@@ -41,7 +41,7 @@ class ProjectCreate(CamelModel):
     key: str = Field(pattern=r"^[A-Z][A-Z0-9]{1,5}$", description="Prefijo de los PBIs, ej: SAL")
     description: str | None = None
     product_goal: str | None = None
-    color: str = Field(default="#5B3FD6", pattern=r"^#[0-9A-Fa-f]{6}$")
+    color: str = Field(default="#447794", pattern=r"^#[0-9A-Fa-f]{6}$")
     my_role: ProjectRoleName = "product_owner"
 
 

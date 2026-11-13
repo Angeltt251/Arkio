@@ -30,7 +30,7 @@ export function initials(name: string): string {
   return ((parts[0]?.[0] ?? '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase() || '?';
 }
 
-const AVATAR_COLORS = ['#7C5CFC', '#22A06B', '#F08A24', '#2F80ED', '#E5487D', '#0EA5A4', '#9B51E0', '#D9822B'];
+const AVATAR_COLORS = ['#447794', '#22A06B', '#F08A24', '#2F80ED', '#E5487D', '#0EA5A4', '#2D5B75', '#D9822B'];
 
 export function colorFor(seed: string): string {
   let hash = 0;

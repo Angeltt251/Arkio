@@ -1,0 +1,72 @@
+from datetime import date
+from typing import Literal
+from uuid import UUID
+
+from pydantic import Field
+
+from app.schemas.common import CamelModel
+
+PriorityName = Literal["low", "medium", "high", "critical"]
+
+
+class BoardMember(CamelModel):
+    id: UUID
+    name: str
+    avatar_url: str | None = None
+
+
+class TaskOut(CamelModel):
+    id: UUID
+    column_id: UUID
+    title: str
+    description: str | None
+    priority: PriorityName
+    position: float
+    due_date: date | None
+    is_blocked: bool
+    blocked_reason: str | None
+    assignee_ids: list[UUID]
+    completed: bool
+
+
+class ColumnOut(CamelModel):
+    id: UUID
+    name: str
+    position: int
+    wip_limit: int | None
+    is_done: bool
+    tasks: list[TaskOut]
+
+
+class BoardOut(CamelModel):
+    project_id: UUID
+    project_name: str
+    project_key: str
+    project_color: str
+    can_edit: bool
+    columns: list[ColumnOut]
+    members: list[BoardMember]
+
+
+class TaskCreate(CamelModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=5000)
+    priority: PriorityName = "medium"
+    column_id: UUID | None = None  # por defecto, la primera columna
+    due_date: date | None = None
+    assignee_ids: list[UUID] = []
+
+
+class TaskUpdate(CamelModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=5000)
+    priority: PriorityName | None = None
+    due_date: date | None = None
+    is_blocked: bool | None = None
+    blocked_reason: str | None = Field(default=None, max_length=500)
+    assignee_ids: list[UUID] | None = None
+
+
+class TaskMove(CamelModel):
+    column_id: UUID
+    index: int = Field(ge=0, description="Posición destino dentro de la columna (0 = arriba)")

@@ -14,7 +14,7 @@ export const mockDashboard: DashboardData = {
     {
       id: 'p1',
       name: 'Sistema Salud',
-      color: '#6D4AE8',
+      color: '#447794',
       status: 'active',
       sprintNumber: 1,
       sprintDays: 10,

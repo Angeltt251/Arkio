@@ -7,9 +7,16 @@ from sqlalchemy import select
 from app.api.deps import CurrentUser, UserDB
 from app.db.models import ActivityLog, Profile, Project
 from app.schemas.workspace import ActivityOut, ProjectOut
-from app.services.permissions import project_access
+from app.services.permissions import accessible_project_ids, project_access
 
 router = APIRouter(prefix="/projects", tags=["proyectos y bitácora"])
+
+
+@router.get("", response_model=list[ProjectOut])
+def list_my_projects(user: CurrentUser, db: UserDB) -> list[Project]:
+    """Todos los proyectos a los que el usuario tiene acceso, en cualquier espacio."""
+    ids = accessible_project_ids(db, user.id)
+    return list(db.scalars(select(Project).where(Project.id.in_(ids)).order_by(Project.created_at))) if ids else []
 
 
 @router.get("/{project_id}", response_model=ProjectOut)

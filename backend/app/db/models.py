@@ -66,7 +66,7 @@ class Project(Base):
     description: Mapped[str | None] = mapped_column(Text)
     product_goal: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(ProjectStatus, default="planning")
-    color: Mapped[str] = mapped_column(Text, default="#5B3FD6")
+    color: Mapped[str] = mapped_column(Text, default="#447794")
     created_by: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
@@ -149,8 +149,17 @@ class Task(Base):
     position: Mapped[float] = mapped_column(Float, default=0)
     due_date: Mapped[date | None] = mapped_column(Date)
     is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    blocked_reason: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TaskAssignee(Base):
+    __tablename__ = "task_assignees"
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"), primary_key=True)
 
 
 class ActivityLog(Base):

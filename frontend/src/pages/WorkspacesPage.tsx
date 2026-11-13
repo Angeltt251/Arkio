@@ -22,7 +22,7 @@ interface Project {
   color: string;
 }
 
-const COLORS = ['#5B3FD6', '#2F80ED', '#27AE60', '#F2994A', '#EB5757', '#9B51E0'];
+const COLORS = ['#447794', '#2D5B75', '#123249', '#27AE60', '#F2994A', '#EB5757'];
 
 const ROLE_LABEL: Record<ProjectRole, string> = {
   product_owner: 'Product Owner',
