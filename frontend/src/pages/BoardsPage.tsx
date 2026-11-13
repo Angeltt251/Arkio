@@ -43,6 +43,7 @@ interface Board {
   projectKey: string;
   projectColor: string;
   canEdit: boolean;
+  canManageColumns: boolean;
   columns: Column[];
   members: Member[];
 }
@@ -84,6 +85,11 @@ export function BoardsPage() {
   const [dropTarget, setDropTarget] = useState<{ columnId: string; index: number } | null>(null);
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newPriority, setNewPriority] = useState<Priority>('medium');
+  const [columnEditing, setColumnEditing] = useState<Column | null>(null);
+  const [addingColumn, setAddingColumn] = useState(false);
+  const [newColumnName, setNewColumnName] = useState('');
   const [editing, setEditing] = useState<Task | null>(null);
   const reloadTimer = useRef<number | undefined>(undefined);
 
@@ -174,15 +180,35 @@ export function BoardsPage() {
     try {
       const task = await apiFetch<Task>(`/api/projects/${projectId}/tasks`, token, {
         method: 'POST',
-        body: JSON.stringify({ title, columnId }),
+        body: JSON.stringify({ title, columnId, description: newDescription.trim() || null, priority: newPriority }),
       });
       setBoard((b) =>
         b ? { ...b, columns: b.columns.map((c) => (c.id === columnId ? { ...c, tasks: [...c.tasks, task] } : c)) } : b,
       );
       setNewTitle('');
+      setNewDescription('');
+      setNewPriority('medium');
       setError(null);
     } catch (err) {
       setError(errorMessage(err, 'No se pudo crear la tarea.'));
+    }
+  };
+
+  const createColumn = async (e: FormEvent) => {
+    e.preventDefault();
+    const name = newColumnName.trim();
+    if (!name || !projectId) return;
+    try {
+      const column = await apiFetch<Column>(`/api/projects/${projectId}/columns`, token, {
+        method: 'POST',
+        body: JSON.stringify({ name }),
+      });
+      setBoard((b) => (b ? { ...b, columns: [...b.columns, column] } : b));
+      setNewColumnName('');
+      setAddingColumn(false);
+      setError(null);
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo crear la columna.'));
     }
   };
 
@@ -255,11 +281,22 @@ export function BoardsPage() {
               <section key={column.id} className={`board-col${dropTarget?.columnId === column.id ? ' board-col--over' : ''}`}
                 aria-label={column.name}>
                 <header className="board-col__head">
-                  <h2>{column.name}</h2>
-                  <span className={`board-col__count${overLimit ? ' board-col__count--limit' : ''}`}
-                    title={column.wipLimit ? `Límite WIP: ${column.wipLimit}` : undefined}>
-                    {column.tasks.length}{column.wipLimit ? ` / ${column.wipLimit}` : ''}
-                  </span>
+                  <h2>
+                    {column.name}
+                    {column.isDone && <span className="board-col__done" title="Las tareas aquí cuentan como terminadas">✓</span>}
+                  </h2>
+                  <div className="board-col__tools">
+                    <span className={`board-col__count${overLimit ? ' board-col__count--limit' : ''}`}
+                      title={column.wipLimit ? `Límite WIP: ${column.wipLimit}` : undefined}>
+                      {column.tasks.length}{column.wipLimit ? ` / ${column.wipLimit}` : ''}
+                    </span>
+                    {board.canManageColumns && (
+                      <button type="button" className="board-col__menu" aria-label={`Opciones de la columna ${column.name}`}
+                        title="Opciones de la columna" onClick={() => setColumnEditing(column)}>
+                        ⋯
+                      </button>
+                    )}
+                  </div>
                 </header>
 
                 <div className="board-col__list" onDragOver={(e) => onDragOverColumn(e, column)} onDrop={onDrop}>
@@ -284,6 +321,7 @@ export function BoardsPage() {
                           {task.isBlocked && <span className="task-card__blocked" title={task.blockedReason ?? ''}>Bloqueada</span>}
                         </div>
                         <h3 className={task.completed ? 'task-card__title--done' : undefined}>{task.title}</h3>
+                        {task.description && <p className="task-card__desc">{task.description}</p>}
                         {(task.dueDate || task.assigneeIds.length > 0) && (
                           <footer className="task-card__foot">
                             <span className="muted small">
@@ -311,6 +349,14 @@ export function BoardsPage() {
                       <input autoFocus placeholder="Título de la tarea" maxLength={200} value={newTitle}
                         onChange={(e) => setNewTitle(e.target.value)}
                         onKeyDown={(e) => e.key === 'Escape' && setAddingTo(null)} />
+                      <textarea className="textarea" rows={2} maxLength={5000} placeholder="Descripción (opcional)"
+                        value={newDescription} onChange={(e) => setNewDescription(e.target.value)} />
+                      <select className="select" aria-label="Prioridad" value={newPriority}
+                        onChange={(e) => setNewPriority(e.target.value as Priority)}>
+                        {Object.entries(PRIORITY_LABEL).map(([value, label]) => (
+                          <option key={value} value={value}>Prioridad {label.toLowerCase()}</option>
+                        ))}
+                      </select>
                       <div className="board-add__actions">
                         <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setAddingTo(null); setNewTitle(''); }}>
                           Cancelar
@@ -319,14 +365,44 @@ export function BoardsPage() {
                       </div>
                     </form>
                   ) : (
-                    <button type="button" className="board-col__add" onClick={() => { setAddingTo(column.id); setNewTitle(''); }}>
+                    <button type="button" className="board-col__add"
+                      onClick={() => { setAddingTo(column.id); setNewTitle(''); setNewDescription(''); setNewPriority('medium'); }}>
                       <Icon name="plus" size={16} /> Añadir tarea
                     </button>
                   ))}
               </section>
             );
           })}
+
+          {board.canManageColumns && (
+            <section className="board-col board-col--new" aria-label="Nueva columna">
+              {addingColumn ? (
+                <form className="board-add" onSubmit={createColumn}>
+                  <input autoFocus placeholder="Nombre de la columna" maxLength={60} value={newColumnName}
+                    onChange={(e) => setNewColumnName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Escape' && setAddingColumn(false)} />
+                  <div className="board-add__actions">
+                    <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setAddingColumn(false); setNewColumnName(''); }}>
+                      Cancelar
+                    </button>
+                    <button className="btn btn--primary btn--sm" disabled={!newColumnName.trim()}>Crear columna</button>
+                  </div>
+                </form>
+              ) : (
+                <button type="button" className="board-col__add" onClick={() => setAddingColumn(true)}>
+                  <Icon name="plus" size={16} /> Añadir columna
+                </button>
+              )}
+            </section>
+          )}
         </div>
+      )}
+
+      {columnEditing && board && (
+        <ColumnDialog column={columnEditing} board={board} token={token}
+          onClose={() => setColumnEditing(null)}
+          onChanged={(columns) => { setBoard((b) => (b ? { ...b, columns } : b)); setColumnEditing(null); }}
+          onDeleted={() => { setColumnEditing(null); void loadBoard(); }} />
       )}
 
       {editing && board && (
@@ -503,6 +579,160 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved 
               {saving ? 'Guardando…' : 'Guardar'}
             </button>
           </footer>
+        )}
+      </form>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ opciones de columna
+interface ColumnDialogProps {
+  column: Column;
+  board: Board;
+  token: string | null;
+  onClose: () => void;
+  onChanged: (columns: Column[]) => void;
+  onDeleted: () => void;
+}
+
+function ColumnDialog({ column, board, token, onClose, onChanged, onDeleted }: ColumnDialogProps) {
+  const [name, setName] = useState(column.name);
+  const [wipLimit, setWipLimit] = useState(column.wipLimit ? String(column.wipLimit) : '');
+  const [isDone, setIsDone] = useState(column.isDone);
+  const [moveTo, setMoveTo] = useState(board.columns.find((c) => c.id !== column.id)?.id ?? '');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const index = board.columns.findIndex((c) => c.id === column.id);
+  const others = board.columns.filter((c) => c.id !== column.id);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const run = async (action: () => Promise<void>, fallback: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(errorMessage(err, fallback));
+      setBusy(false);
+    }
+  };
+
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    void run(async () => {
+      const limit = wipLimit.trim() ? Number(wipLimit) : null;
+      const updated = await apiFetch<Column>(`/api/columns/${column.id}`, token, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: name.trim(), wipLimit: limit, isDone }),
+      });
+      onChanged(board.columns.map((c) => (c.id === updated.id ? updated : c)));
+    }, 'No se pudo guardar la columna.');
+  };
+
+  const move = (to: number) =>
+    run(async () => {
+      onChanged(await apiFetch<Column[]>(`/api/columns/${column.id}/move`, token, {
+        method: 'POST',
+        body: JSON.stringify({ index: to }),
+      }));
+    }, 'No se pudo mover la columna.');
+
+  const remove = () =>
+    run(async () => {
+      const query = column.tasks.length ? `?move_to=${moveTo}` : '';
+      await apiFetch(`/api/columns/${column.id}${query}`, token, { method: 'DELETE' });
+      onDeleted();
+    }, 'No se pudo eliminar la columna.');
+
+  const wipValid = !wipLimit.trim() || (/^\d+$/.test(wipLimit.trim()) && Number(wipLimit) >= 1);
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="dialog card" onSubmit={save} role="dialog" aria-modal="true" aria-label="Opciones de la columna">
+        <header className="card__head">
+          <h2><Icon name="boards" size={20} className="card__icon" /> Columna «{column.name}»</h2>
+          <button type="button" className="icon-btn" aria-label="Cerrar" onClick={onClose}>
+            <Icon name="close" size={18} />
+          </button>
+        </header>
+
+        <div className="form" style={{ marginTop: 0 }}>
+          <label className="field">
+            <span>Nombre</span>
+            <div className="input">
+              <input required maxLength={60} value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+          </label>
+
+          <label className="field">
+            <span className="field__row">
+              Límite WIP <span className="muted small">Máximo de tareas a la vez (vacío = sin límite)</span>
+            </span>
+            <div className="input">
+              <input inputMode="numeric" placeholder="Sin límite" value={wipLimit}
+                onChange={(e) => setWipLimit(e.target.value.replace(/[^0-9]/g, ''))} />
+            </div>
+          </label>
+
+          <label className="check">
+            <input type="checkbox" checked={isDone} onChange={(e) => setIsDone(e.target.checked)} />
+            Las tareas en esta columna cuentan como terminadas
+          </label>
+
+          <div className="field">
+            <span>Posición</span>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button type="button" className="btn btn--ghost btn--sm" disabled={busy || index === 0} onClick={() => move(index - 1)}>
+                ← Mover a la izquierda
+              </button>
+              <button type="button" className="btn btn--ghost btn--sm" disabled={busy || index === board.columns.length - 1}
+                onClick={() => move(index + 1)}>
+                Mover a la derecha →
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="form__error" role="alert">{error}</p>}
+
+        <footer className="dialog__actions">
+          <button type="button" className="btn btn--ghost btn--danger" disabled={busy || others.length === 0}
+            title={others.length === 0 ? 'El tablero debe tener al menos una columna' : undefined}
+            onClick={() => setConfirmDelete(true)}>
+            Eliminar columna
+          </button>
+          <span style={{ flex: 1 }} />
+          <button type="button" className="btn btn--ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn btn--primary" disabled={busy || !name.trim() || !wipValid}>Guardar</button>
+        </footer>
+
+        {confirmDelete && (
+          <div className="column-delete" role="alertdialog" aria-label="Confirmar eliminación">
+            <p className="small">
+              {column.tasks.length
+                ? <>Esta columna tiene <strong>{column.tasks.length}</strong> {column.tasks.length === 1 ? 'tarea' : 'tareas'}. ¿A qué columna las movemos?</>
+                : <>¿Eliminar la columna «{column.name}»? Quedará registrado en la bitácora.</>}
+            </p>
+            {column.tasks.length > 0 && (
+              <select className="select" aria-label="Mover tareas a" value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
+                {others.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
+            <div className="board-add__actions">
+              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setConfirmDelete(false)}>No, volver</button>
+              <button type="button" className="btn btn--primary btn--sm btn--danger-solid" disabled={busy} onClick={remove}>
+                Sí, eliminar
+              </button>
+            </div>
+          </div>
         )}
       </form>
     </div>

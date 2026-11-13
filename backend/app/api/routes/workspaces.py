@@ -216,5 +216,4 @@ def revoke_invitation(workspace_id: UUID, invitation_id: UUID, user: CurrentUser
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Invitación no encontrada")
     if invitation.status == "pending":
         invitation.status = "revoked"
-        invitation.responded_at = datetime.now(timezone.utc)
-        db.commit()
+        invitation.responded_at = d

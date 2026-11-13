@@ -44,6 +44,7 @@ class BoardOut(CamelModel):
     project_key: str
     project_color: str
     can_edit: bool
+    can_manage_columns: bool
     columns: list[ColumnOut]
     members: list[BoardMember]
 
@@ -70,3 +71,19 @@ class TaskUpdate(CamelModel):
 class TaskMove(CamelModel):
     column_id: UUID
     index: int = Field(ge=0, description="Posición destino dentro de la columna (0 = arriba)")
+
+
+class ColumnCreate(CamelModel):
+    name: str = Field(min_length=1, max_length=60)
+    wip_limit: int | None = Field(default=None, ge=1, le=999)
+    is_done: bool = False
+
+
+class ColumnUpdate(CamelModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    wip_limit: int | None = Field(default=None, ge=1, le=999)
+    is_done: bool | None = None
+
+
+class ColumnMove(CamelModel):
+    index: int = Field(ge=0, description="Nueva posición (0 = primera columna)")
