@@ -190,7 +190,8 @@ def _issue_invitation(db, invitation: Invitation, inviter_id: UUID) -> Invitatio
     )
     out = InvitationOut.model_validate(invitation)
     out.link = link
-    out.email_sent = send_email(invitation.email, subject, html, text_body)
+    out.email_error = send_email(invitation.email, subject, html, text_body)
+    out.email_sent = out.email_error is None
     return out
 
 

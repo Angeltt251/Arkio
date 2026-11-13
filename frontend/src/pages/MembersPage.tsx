@@ -34,6 +34,7 @@ interface Invitation {
   expiresAt: string;
   link?: string | null;
   emailSent?: boolean | null;
+  emailError?: string | null;
 }
 
 interface Project {
@@ -383,6 +384,7 @@ function InviteCard({ workspaceId, token, projects, pending, onCreated, onRevoke
               : <>⚠ No se pudo enviar el correo a <strong>{created.email}</strong>. Compártele este enlace por otro medio
                 (también verá la invitación al entrar a Arkio con ese correo):</>}
           </p>
+          {!created.emailSent && created.emailError && <p className="small"><strong>Motivo:</strong> {created.emailError}</p>}
           <div className="invite-link__row">
             <code>{created.link}</code>
             <button type="button" className="btn btn--ghost btn--sm" onClick={() => copy(created.link!)}>

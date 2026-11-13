@@ -22,8 +22,12 @@ from app.core.config import settings
 logger = logging.getLogger("arkio.email")
 
 
-def send_email(to: str, subject: str, html: str, text: str) -> bool:
-    """Envía el correo y devuelve si se entregó al proveedor. Nunca lanza excepción:
+class EmailError(Exception):
+    """Fallo del proveedor con un motivo que se puede mostrar al administrador."""
+
+
+def send_email(to: str, subject: str, html: str, text: str) -> str | None:
+    """Envía el correo y devuelve None si salió, o el motivo del fallo. Nunca lanza excepción:
     si falla, la invitación igual existe y su enlace se puede copiar desde la app."""
     provider = settings.email_provider
     try:
@@ -35,12 +39,15 @@ def send_email(to: str, subject: str, html: str, text: str) -> bool:
             _send_brevo(to, subject, html, text)
         else:
             logger.info("EMAIL_PROVIDER=log → correo NO enviado a %s | %s\n%s", to, subject, text)
-            return False
+            return "El envío de correos no está configurado en el servidor (EMAIL_PROVIDER=log)."
         logger.info("Correo enviado a %s (%s)", to, provider)
-        return True
+        return None
+    except EmailError as exc:
+        logger.error("No se pudo enviar el correo a %s (%s): %s", to, provider, exc)
+        return str(exc)
     except Exception:
         logger.exception("No se pudo enviar el correo a %s (%s)", to, provider)
-        return False
+        return "Error inesperado al contactar al proveedor de correo."
 
 
 def _send_smtp(to: str, subject: str, html: str, text: str) -> None:
@@ -93,7 +100,23 @@ def _send_brevo(to: str, subject: str, html: str, text: str) -> None:
         timeout=15,
     )
     if response.status_code >= 400:
-        raise RuntimeError(f"Brevo respondió {response.status_code}: {response.text[:300]}")
+        logger.error("Brevo respondió %s: %s", response.status_code, response.text[:300])
+        raise EmailError(_brevo_reason(response.status_code, response.text))
+
+
+def _brevo_reason(status: int, body: str) -> str:
+    """Traduce los errores habituales de Brevo a una indicación de cómo resolverlos."""
+    lower = body.lower()
+    if status == 401 or "key not found" in lower:
+        return "Brevo rechazó la API key (no existe o está mal copiada). Revisa BREVO_API_KEY en Render."
+    if "transactional" in lower or "permission_denied" in lower:
+        return ("La API key de Brevo no tiene permiso para enviar correos. Crea una clave nueva con acceso completo "
+                "en Brevo (SMTP & API → API Keys) o activa los correos transaccionales de tu cuenta.")
+    if "sender" in lower:
+        return f"Brevo no acepta el remitente {settings.email_from}: verifícalo en Brevo → Senders."
+    if "ip" in lower and "authoriz" in lower:
+        return "Brevo bloqueó la IP del servidor: desactiva la restricción de IPs en Brevo → Security → Authorized IPs."
+    return f"Brevo respondió {status}: {body[:200]}"
 
 
 def invitation_email(*, inviter: str, workspace: str, project: str | None, link: str, hours: int) -> tuple[str, str, str]:

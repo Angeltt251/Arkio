@@ -84,6 +84,7 @@ class InvitationOut(CamelModel):
     # Solo al crearla: el enlace no se puede recuperar después (en la BD se guarda el hash)
     link: str | None = None
     email_sent: bool | None = None
+    email_error: str | None = None
 
 
 class MemberRoleUpdate(CamelModel):

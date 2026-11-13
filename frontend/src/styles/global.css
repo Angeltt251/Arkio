@@ -1390,3 +1390,61 @@ button:disabled {
 }
 .invite-link--warn { background: var(--orange-bg); border-color: var(--orange-border); }
 .received { border-color: var(--primary); }
+
+/* =====================================================================
+   Responsive: tablets y móviles
+   ===================================================================== */
+.projects { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+.card__head { flex-wrap: wrap; }
+.card__head h2 { min-width: 0; overflow-wrap: anywhere; }
+.page-head > div { min-width: 0; }
+.page-head h1 { overflow-wrap: anywhere; }
+.page-head .select { max-width: 100%; }
+img, svg { max-width: 100%; }
+
+@media (max-width: 900px) {
+  /* El tablero ocupa el ancho y se desliza columna por columna */
+  .board { scroll-snap-type: x mandatory; margin: 0 -1rem; padding: 0 1rem 0.75rem; }
+  .board-col { scroll-snap-align: start; }
+  .dialog-backdrop { align-items: end; padding: 0; }
+  .dialog {
+    width: 100%;
+    max-height: 92dvh;
+    border-radius: var(--radius) var(--radius) 0 0;
+    padding-bottom: calc(1.3rem + env(safe-area-inset-bottom));
+  }
+}
+
+@media (max-width: 640px) {
+  .content { padding: 1rem 0.85rem 2rem; }
+  .card { padding: 1rem; border-radius: 14px; }
+  .dashboard { gap: 1rem; }
+  .page-head { align-items: stretch; }
+  .page-head .btn, .page-head .select { width: 100%; }
+  .card__head .select { width: 100%; }
+
+  /* Evita el zoom automático de iOS al enfocar campos (requiere 16px) */
+  input, select, textarea, .select, .textarea, .input input, .board-add input { font-size: 16px; }
+
+  /* Objetivos táctiles cómodos */
+  .btn { min-height: 42px; }
+  .btn--sm { min-height: 38px; }
+  .icon-btn { width: 42px; height: 42px; }
+
+  .member-row { gap: 0.6rem; }
+  .member-row .member-row__info { flex-basis: calc(100% - 50px); }
+  .member-row .select { flex: 1; }
+  .invite-link__row { flex-direction: column; align-items: stretch; }
+  .team-add > * { flex: 1 1 100%; }
+  .dialog__actions { flex-wrap: wrap; }
+  .dialog__actions > span { display: none; }
+  .dialog__actions .btn { flex: 1; }
+  .board { grid-auto-columns: 86vw; }
+  .search { flex: 1 1 auto; }
+  .topbar { gap: 0.5rem; }
+}
+
+@media (max-width: 380px) {
+  .theme-toggle { display: none; }
+  .page-head h1 { font-size: 1.4rem; }
+}

@@ -333,6 +333,8 @@ export function BoardsPage() {
         <TaskDialog task={editing} board={board} token={token}
           onClose={() => setEditing(null)}
           onSaved={(t) => { replaceTask(t); setEditing(null); }}
+          onMoved={(id, columnId) =>
+            setBoard((b) => (b ? { ...b, columns: moveLocally(b.columns, id, columnId, Number.MAX_SAFE_INTEGER) } : b))}
           onArchived={(id) => { removeTask(id); setEditing(null); }} />
       )}
     </div>
@@ -346,9 +348,10 @@ interface TaskDialogProps {
   onClose: () => void;
   onSaved: (task: Task) => void;
   onArchived: (taskId: string) => void;
+  onMoved: (taskId: string, columnId: string) => void;
 }
 
-function TaskDialog({ task, board, token, onClose, onSaved, onArchived }: TaskDialogProps) {
+function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved }: TaskDialogProps) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
   const [priority, setPriority] = useState<Priority>(task.priority);
@@ -356,6 +359,7 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived }: TaskDi
   const [assignees, setAssignees] = useState<string[]>(task.assigneeIds);
   const [isBlocked, setIsBlocked] = useState(task.isBlocked);
   const [blockedReason, setBlockedReason] = useState(task.blockedReason ?? '');
+  const [columnId, setColumnId] = useState(task.columnId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const readOnly = !board.canEdit;
@@ -371,6 +375,14 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived }: TaskDi
     setSaving(true);
     setError(null);
     try {
+      if (columnId !== task.columnId) {
+        const target = board.columns.find((c) => c.id === columnId);
+        await apiFetch(`/api/tasks/${task.id}/move`, token, {
+          method: 'POST',
+          body: JSON.stringify({ columnId, index: target?.tasks.length ?? 0 }),
+        });
+        onMoved(task.id, columnId);
+      }
       onSaved(
         await apiFetch<Task>(`/api/tasks/${task.id}`, token, {
           method: 'PATCH',
@@ -427,6 +439,15 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived }: TaskDi
             <span>Descripción</span>
             <textarea className="textarea" rows={4} maxLength={5000} value={description}
               placeholder="Detalles, criterios de aceptación…" onChange={(e) => setDescription(e.target.value)} />
+          </label>
+
+          <label className="field">
+            <span>Estado (columna)</span>
+            <select className="select" value={columnId} onChange={(e) => setColumnId(e.target.value)}>
+              {board.columns.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
           </label>
 
           <div className="dialog__row">
