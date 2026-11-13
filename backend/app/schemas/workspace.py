@@ -130,4 +130,5 @@ class ActivityOut(CamelModel):
     entity_type: str
     entity_id: UUID | None
     changes: dict
-    so
+    source: str
+    created_at: datetime
