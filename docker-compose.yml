@@ -1,0 +1,36 @@
+# Desarrollo local: docker compose up --build
+# La base de datos y Auth son de Supabase (servicio administrado), no se levantan aquí.
+services:
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      # En Docker los correos de invitación se capturan en Mailpit: http://localhost:8025
+      EMAIL_PROVIDER: smtp
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_STARTTLS: "false"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/app:/app/app
+    depends_on:
+      - mailpit
+
+  frontend:
+    build: ./frontend
+    env_file: ./frontend/.env.local
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"   # bandeja web
+      - "1025:1025"   # SMTP

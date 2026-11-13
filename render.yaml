@@ -1,0 +1,33 @@
+# Blueprint de Render para el backend (FastAPI).
+# Render → New → Blueprint → elige este repositorio.
+services:
+  - type: web
+    name: arkio-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false          # ej: ["https://arkio.pages.dev"]
+      - key: FRONTEND_URL
+        sync: false          # ej: https://arkio.pages.dev
+      - key: EMAIL_PROVIDER
+        value: resend        # el plan gratis de Render bloquea SMTP (25/465/587)
+      - key: EMAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false

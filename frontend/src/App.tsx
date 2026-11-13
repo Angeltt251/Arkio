@@ -1,0 +1,40 @@
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { AppLayout } from '@/components/layout/AppLayout';
+import { NAV_ITEMS } from '@/config/navigation';
+import { AuthProvider } from '@/context/AuthContext';
+import { ThemeProvider } from '@/context/ThemeContext';
+import { DashboardPage } from '@/pages/DashboardPage';
+import { InvitationPage } from '@/pages/InvitationPage';
+import { ModulePlaceholder } from '@/pages/ModulePlaceholder';
+import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage';
+import { LoginPage } from '@/pages/auth/LoginPage';
+import { RegisterPage } from '@/pages/auth/RegisterPage';
+import { ProtectedRoute } from '@/routes/ProtectedRoute';
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AuthProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/registro" element={<RegisterPage />} />
+            <Route path="/recuperar" element={<ForgotPasswordPage />} />
+            <Route path="/invitacion/:token" element={<InvitationPage />} />
+
+            <Route element={<ProtectedRoute />}>
+              <Route element={<AppLayout />}>
+                <Route index element={<DashboardPage />} />
+                {NAV_ITEMS.filter((item) => item.to !== '/').map((item) => (
+                  <Route key={item.to} path={item.to} element={<ModulePlaceholder item={item} />} />
+                ))}
+              </Route>
+            </Route>
+
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AuthProvider>
+    </ThemeProvider>
+  );
+}

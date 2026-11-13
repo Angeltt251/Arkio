@@ -1,0 +1,26 @@
+# Dependencias y builds
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+# Variables de entorno (¡nunca subir secretos!)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Sistema / editores
+.DS_Store
+.vscode/
+.idea/
+
+# Supabase CLI local
+supabase/.temp/
+supabase/.branches/
+
+# Logs
+*.log
