@@ -13,6 +13,7 @@ from app.schemas.workspace import (
     InvitationCreate,
     InvitationOut,
     MemberOut,
+    MemberRoleUpdate,
     ProjectCreate,
     ProjectOut,
     WorkspaceCreate,
@@ -89,6 +90,25 @@ def list_members(workspace_id: UUID, user: CurrentUser, db: UserDB) -> list[Memb
     ]
 
 
+@router.patch("/{workspace_id}/members/{member_id}", response_model=MemberOut)
+def change_member_role(
+    workspace_id: UUID, member_id: UUID, payload: MemberRoleUpdate, user: CurrentUser, db: UserDB
+) -> MemberOut:
+    require_workspace_admin(db, workspace_id, user.id)
+    member = db.get(WorkspaceMember, (workspace_id, member_id))
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Miembro no encontrado")
+    if member.role == "owner":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No se puede cambiar el rol del propietario")
+    member.role = payload.role
+    db.commit()
+    profile = db.get(Profile, member_id)
+    return MemberOut(
+        user_id=profile.id, full_name=profile.full_name, email=profile.email, avatar_url=profile.avatar_url,
+        role=member.role, status=member.status,
+    )
+
+
 @router.post("/{workspace_id}/members/{member_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_member(workspace_id: UUID, member_id: UUID, user: CurrentUser, db: UserDB) -> None:
     require_workspace_admin(db, workspace_id, user.id)
@@ -117,7 +137,7 @@ def list_invitations(workspace_id: UUID, user: CurrentUser, db: UserDB) -> list[
 @router.post("/{workspace_id}/invitations", response_model=InvitationOut, status_code=status.HTTP_201_CREATED)
 def create_invitation(
     workspace_id: UUID, payload: InvitationCreate, background: BackgroundTasks, user: CurrentUser, db: UserDB
-) -> Invitation:
+) -> InvitationOut:
     require_workspace_admin(db, workspace_id, user.id)
     workspace = db.get(Workspace, workspace_id)
     project = None
@@ -155,7 +175,10 @@ def create_invitation(
         project=project.name if project else None, link=link, hours=settings.invitation_ttl_hours,
     )
     background.add_task(send_email, email, subject, html, text_body)
-    return invitation
+    out = InvitationOut.model_validate(invitation)
+    out.link = link
+    out.email_sent = settings.email_provider != "log"
+    return out
 
 
 @router.post("/{workspace_id}/invitations/{invitation_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)

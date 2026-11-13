@@ -1,13 +1,13 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, UserDB
-from app.db.models import ActivityLog, Profile, Project
-from app.schemas.workspace import ActivityOut, ProjectOut
-from app.services.permissions import accessible_project_ids, project_access
+from app.db.models import ActivityLog, Profile, Project, ProjectMember, WorkspaceMember
+from app.schemas.workspace import ActivityOut, ProjectMemberOut, ProjectMemberSet, ProjectOut
+from app.services.permissions import accessible_project_ids, project_access, require_project_manager
 
 router = APIRouter(prefix="/projects", tags=["proyectos y bitácora"])
 
@@ -62,3 +62,53 @@ def project_activity(
         )
         for log, name in rows
     ]
+
+
+# ------------------------------------------------------------------ equipo del proyecto
+@router.get("/{project_id}/members", response_model=list[ProjectMemberOut])
+def list_project_members(project_id: UUID, user: CurrentUser, db: UserDB) -> list[ProjectMemberOut]:
+    project_access(db, project_id, user.id)
+    rows = db.execute(
+        select(ProjectMember, Profile).join(Profile, Profile.id == ProjectMember.user_id)
+        .where(ProjectMember.project_id == project_id).order_by(ProjectMember.added_at)
+    )
+    return [
+        ProjectMemberOut(user_id=p.id, full_name=p.full_name, email=p.email, avatar_url=p.avatar_url, role=m.role)
+        for m, p in rows
+    ]
+
+
+@router.put("/{project_id}/members/{member_id}", response_model=ProjectMemberOut)
+def set_project_member(
+    project_id: UUID, member_id: UUID, payload: ProjectMemberSet, user: CurrentUser, db: UserDB
+) -> ProjectMemberOut:
+    """Agrega a un integrante del espacio al proyecto, o cambia su rol Scrum."""
+    project = require_project_manager(db, project_id, user.id)
+    ws_member = db.get(WorkspaceMember, (project.workspace_id, member_id))
+    if ws_member is None or ws_member.status != "active":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Primero debe ser miembro activo del espacio de trabajo")
+    member = db.get(ProjectMember, (project_id, member_id))
+    if member is None:
+        member = ProjectMember(project_id=project_id, user_id=member_id, role=payload.role)
+        db.add(member)
+    else:
+        member.role = payload.role
+    db.commit()
+    profile = db.get(Profile, member_id)
+    return ProjectMemberOut(
+        user_id=profile.id, full_name=profile.full_name, email=profile.email, avatar_url=profile.avatar_url,
+        role=payload.role,
+    )
+
+
+@router.delete("/{project_id}/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_project_member(project_id: UUID, member_id: UUID, user: CurrentUser, db: UserDB) -> None:
+    require_project_manager(db, project_id, user.id)
+    member = db.get(ProjectMember, (project_id, member_id))
+    if member is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Esa persona no es parte del proyecto")
+    remaining = db.scalars(select(ProjectMember.user_id).where(ProjectMember.project_id == project_id)).all()
+    if len(remaining) == 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El proyecto debe tener al menos un integrante")
+    db.delete(member)
+    db.commit()

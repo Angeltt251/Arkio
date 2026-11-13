@@ -81,6 +81,25 @@ class InvitationOut(CamelModel):
     project_role: str | None
     status: str
     expires_at: datetime
+    # Solo al crearla: el enlace no se puede recuperar después (en la BD se guarda el hash)
+    link: str | None = None
+    email_sent: bool | None = None
+
+
+class MemberRoleUpdate(CamelModel):
+    role: Literal["admin", "member"]
+
+
+class ProjectMemberOut(CamelModel):
+    user_id: UUID
+    full_name: str
+    email: str
+    avatar_url: str | None
+    role: ProjectRoleName
+
+
+class ProjectMemberSet(CamelModel):
+    role: ProjectRoleName
 
 
 class InvitationPreview(CamelModel):

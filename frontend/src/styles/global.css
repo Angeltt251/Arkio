@@ -1338,3 +1338,53 @@ button:disabled {
   .board { grid-auto-columns: minmax(250px, 85vw); }
   .dialog__row { grid-template-columns: 1fr; }
 }
+
+/* ------------------------------------------------------------ miembros */
+.member-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
+
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.member-row:last-child { border-bottom: none; }
+.member-row--off { opacity: 0.55; }
+.member-row__info { display: grid; min-width: 0; flex: 1; }
+.member-row__info strong { font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.member-row__info span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.section-title { font-size: 0.85rem; font-weight: 700; margin: 1.3rem 0 0.4rem; color: var(--muted); }
+
+.invite-link {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  padding: 0.85rem;
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  border: 1px solid var(--border);
+}
+
+.invite-link__row { display: flex; gap: 0.5rem; align-items: center; }
+
+.invite-link code {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.team-add { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+.team-add .select:first-child { flex: 1; min-width: 180px; }
+
+@media (max-width: 640px) {
+  .member-row { flex-wrap: wrap; }
+}

@@ -33,7 +33,9 @@ def project_access(db: Session, project_id: UUID, user_id: UUID, *, write: bool 
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Proyecto no encontrado")
 
     ws_member = db.get(WorkspaceMember, (project.workspace_id, user_id))
-    if ws_member and ws_member.status == "active" and ws_member.role in ADMIN_ROLES:
+    if ws_member is None or ws_member.status != "active":  # revocado del espacio = sin acceso a sus proyectos
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Proyecto no encontrado")
+    if ws_member.role in ADMIN_ROLES:
         return project
 
     member = db.get(ProjectMember, (project_id, user_id))
@@ -44,8 +46,28 @@ def project_access(db: Session, project_id: UUID, user_id: UUID, *, write: bool 
     return project
 
 
+def require_project_manager(db: Session, project_id: UUID, user_id: UUID) -> Project:
+    """Gestionar el equipo del proyecto: admins del espacio, Product Owner o Scrum Master."""
+    project = project_access(db, project_id, user_id, write=True)
+    ws_member = db.get(WorkspaceMember, (project.workspace_id, user_id))
+    if ws_member.role in ADMIN_ROLES:
+        return project
+    member = db.get(ProjectMember, (project_id, user_id))
+    if member is None or member.role not in ("product_owner", "scrum_master"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el Product Owner, el Scrum Master o un administrador pueden hacer esto")
+    return project
+
+
 def accessible_project_ids(db: Session, user_id: UUID) -> list[UUID]:
-    direct = select(ProjectMember.project_id).where(ProjectMember.user_id == user_id)
+    direct = (
+        select(ProjectMember.project_id)
+        .join(Project, Project.id == ProjectMember.project_id)
+        .join(
+            WorkspaceMember,
+            (WorkspaceMember.workspace_id == Project.workspace_id) & (WorkspaceMember.user_id == ProjectMember.user_id),
+        )
+        .where(ProjectMember.user_id == user_id, WorkspaceMember.status == "active")
+    )
     via_admin = (
         select(Project.id)
         .join(WorkspaceMember, WorkspaceMember.workspace_id == Project.workspace_id)
