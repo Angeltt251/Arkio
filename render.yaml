@@ -26,8 +26,8 @@ services:
       - key: FRONTEND_URL
         sync: false          # ej: https://arkio.pages.dev
       - key: EMAIL_PROVIDER
-        value: resend        # el plan gratis de Render bloquea SMTP (25/465/587)
+        value: brevo         # el plan gratis de Render bloquea SMTP (25/465/587): se usa la API HTTPS de Brevo
       - key: EMAIL_FROM
-        sync: false
-      - key: RESEND_API_KEY
+        sync: false          # ej: Arkio <tu-correo-verificado-en-brevo@gmail.com>
+      - key: BREVO_API_KEY
         sync: false

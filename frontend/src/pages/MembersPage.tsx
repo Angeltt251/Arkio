@@ -41,6 +41,16 @@ interface Project {
   name: string;
 }
 
+interface Received {
+  id: string;
+  workspaceName: string;
+  projectName: string | null;
+  invitedBy: string;
+  workspaceRole: string;
+  projectRole: string | null;
+  expiresAt: string;
+}
+
 interface ProjectMember {
   userId: string;
   fullName: string;
@@ -71,15 +81,20 @@ export function MembersPage() {
   const workspace = workspaces?.find((w) => w.id === workspaceId) ?? null;
   const isAdmin = workspace?.role === 'owner' || workspace?.role === 'admin';
 
-  useEffect(() => {
+  const loadWorkspaces = useCallback(async () => {
     if (!token) return;
-    apiFetch<Workspace[]>('/api/workspaces', token)
-      .then((list) => {
-        setWorkspaces(list);
-        setWorkspaceId((id) => id ?? list[0]?.id ?? null);
-      })
-      .catch((err) => setError(errorMessage(err, 'No se pudieron cargar los espacios.')));
+    try {
+      const list = await apiFetch<Workspace[]>('/api/workspaces', token);
+      setWorkspaces(list);
+      setWorkspaceId((id) => (id && list.some((w) => w.id === id) ? id : list[0]?.id ?? null));
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudieron cargar los espacios.'));
+    }
   }, [token]);
+
+  useEffect(() => {
+    void loadWorkspaces();
+  }, [loadWorkspaces]);
 
   const load = useCallback(async () => {
     if (!token || !workspaceId) return;
@@ -132,6 +147,12 @@ export function MembersPage() {
     }
   };
 
+  const received = <ReceivedInvitations token={token} onAccepted={(workspaceName) => {
+    setWorkspaceId(null);
+    void loadWorkspaces().then(() => setError(null));
+    window.alert(`Ahora eres parte de ${workspaceName}.`);
+  }} />;
+
   if (workspaces && workspaces.length === 0) {
     return (
       <div className="dashboard">
@@ -141,6 +162,7 @@ export function MembersPage() {
             <p className="muted">Invita a tu equipo y asigna roles.</p>
           </div>
         </div>
+        {received}
         <div className="empty">
           <p>Primero crea un espacio de trabajo.</p>
           <Link to="/espacios" className="btn btn--primary btn--sm" style={{ justifySelf: 'center' }}>
@@ -151,7 +173,7 @@ export function MembersPage() {
     );
   }
 
-  const pending = invitations.filter((i) => i.status === 'pending' && new Date(i.expiresAt) > new Date());
+  const pending = invitations.filter((i) => i.status === 'pending' || i.status === 'expired');
 
   return (
     <div className="dashboard">
@@ -173,6 +195,8 @@ export function MembersPage() {
       </div>
 
       {error && <p className="form__error" role="alert">{error}</p>}
+
+      {received}
 
       <div className="grid grid--main">
         <section className="card">
@@ -216,7 +240,8 @@ export function MembersPage() {
 
         {isAdmin && workspaceId ? (
           <InviteCard workspaceId={workspaceId} token={token} projects={projects} pending={pending}
-            onCreated={(inv) => setInvitations((list) => [inv, ...list])} onRevoke={revokeInvitation} />
+            onCreated={(inv) => setInvitations((list) => [inv, ...list.filter((i) => i.id !== inv.id)])}
+            onRevoke={revokeInvitation} />
         ) : (
           <section className="card">
             <header className="card__head">
@@ -280,6 +305,20 @@ function InviteCard({ workspaceId, token, projects, pending, onCreated, onRevoke
     }
   };
 
+  const resend = async (inv: Invitation) => {
+    setError(null);
+    try {
+      const updated = await apiFetch<Invitation>(`/api/workspaces/${workspaceId}/invitations/${inv.id}/resend`, token, {
+        method: 'POST',
+      });
+      onCreated(updated);
+      setCreated(updated);
+      setCopied(false);
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo reenviar la invitación.'));
+    }
+  };
+
   const copy = async (link: string) => {
     try {
       await navigator.clipboard.writeText(link);
@@ -337,11 +376,12 @@ function InviteCard({ workspaceId, token, projects, pending, onCreated, onRevoke
       </form>
 
       {created?.link && (
-        <div className="invite-link" role="status">
+        <div className={`invite-link${created.emailSent ? '' : ' invite-link--warn'}`} role="status">
           <p className="small">
             {created.emailSent
-              ? `Enviamos el enlace a ${created.email}. También puedes compartirlo:`
-              : `Comparte este enlace con ${created.email} (el envío de correos no está configurado):`}
+              ? <>✓ Enviamos la invitación a <strong>{created.email}</strong>. Si no la ve, que revise Spam o compártele este enlace:</>
+              : <>⚠ No se pudo enviar el correo a <strong>{created.email}</strong>. Compártele este enlace por otro medio
+                (también verá la invitación al entrar a Arkio con ese correo):</>}
           </p>
           <div className="invite-link__row">
             <code>{created.link}</code>
@@ -357,18 +397,29 @@ function InviteCard({ workspaceId, token, projects, pending, onCreated, onRevoke
         <>
           <h3 className="section-title">Pendientes</h3>
           <ul className="member-list">
-            {pending.map((inv) => (
-              <li key={inv.id} className="member-row">
-                <Avatar name={inv.email} size={30} />
-                <div className="member-row__info">
-                  <strong>{inv.email}</strong>
-                  <span className="muted small">Vence {dateFmt.format(new Date(inv.expiresAt))}</span>
-                </div>
-                <button type="button" className="btn btn--ghost btn--sm btn--danger" onClick={() => onRevoke(inv)}>
-                  Revocar
-                </button>
-              </li>
-            ))}
+            {pending.map((inv) => {
+              const expired = inv.status === 'expired' || new Date(inv.expiresAt) <= new Date();
+              return (
+                <li key={inv.id} className="member-row">
+                  <Avatar name={inv.email} size={30} />
+                  <div className="member-row__info">
+                    <strong>{inv.email}</strong>
+                    <span className="muted small">
+                      {expired ? 'Vencida' : `Vence ${dateFmt.format(new Date(inv.expiresAt))}`}
+                    </span>
+                  </div>
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => resend(inv)}
+                    title="Envía un enlace nuevo y renueva el vencimiento">
+                    Reenviar
+                  </button>
+                  {!expired && (
+                    <button type="button" className="btn btn--ghost btn--sm btn--danger" onClick={() => onRevoke(inv)}>
+                      Revocar
+                    </button>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </>
       )}
@@ -492,6 +543,65 @@ function ProjectTeams({ token, projects, members }: ProjectTeamsProps) {
           )}
         </>
       )}
+    </section>
+  );
+}
+
+// ------------------------------------------------------------ invitaciones recibidas
+function ReceivedInvitations({ token, onAccepted }: { token: string | null; onAccepted: (workspaceName: string) => void }) {
+  const [items, setItems] = useState<Received[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    apiFetch<Received[]>('/api/invitations/received', token)
+      .then(setItems)
+      .catch(() => setItems([]));
+  }, [token]);
+
+  if (items.length === 0) return null;
+
+  const respond = async (inv: Received, action: 'accept' | 'decline') => {
+    setBusy(inv.id);
+    setError(null);
+    try {
+      await apiFetch(`/api/invitations/received/${inv.id}/${action}`, token, { method: 'POST' });
+      setItems((list) => list.filter((i) => i.id !== inv.id));
+      if (action === 'accept') onAccepted(inv.workspaceName);
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo responder la invitación.'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="card received" style={{ marginBottom: '1.25rem' }}>
+      <header className="card__head">
+        <h2><Icon name="mail" size={22} className="card__icon" /> Invitaciones para ti</h2>
+      </header>
+      {error && <p className="form__error" role="alert">{error}</p>}
+      <ul className="member-list">
+        {items.map((inv) => (
+          <li key={inv.id} className="member-row">
+            <div className="member-row__info">
+              <strong>{inv.projectName ? `${inv.projectName} · ${inv.workspaceName}` : inv.workspaceName}</strong>
+              <span className="muted small">
+                {inv.invitedBy} te invitó como {WS_ROLE_LABEL[inv.workspaceRole as WorkspaceRole] ?? inv.workspaceRole}
+                {inv.projectRole ? ` · ${ROLE_LABEL[inv.projectRole] ?? inv.projectRole}` : ''}
+                {' · '}vence {dateFmt.format(new Date(inv.expiresAt))}
+              </span>
+            </div>
+            <button type="button" className="btn btn--primary btn--sm" disabled={busy === inv.id} onClick={() => respond(inv, 'accept')}>
+              Aceptar
+            </button>
+            <button type="button" className="btn btn--ghost btn--sm" disabled={busy === inv.id} onClick={() => respond(inv, 'decline')}>
+              Rechazar
+            </button>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { useAuth } from '@/context/AuthContext';
 import { AuthLayout } from './AuthLayout';
@@ -7,14 +7,18 @@ import { AuthLayout } from './AuthLayout';
 export function RegisterPage() {
   const { user, signUp } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Si viene desde una invitación, vuelve a ella después de registrarse
+  const state = location.state as { from?: string; email?: string } | null;
+  const from = state?.from ?? '/';
   const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(state?.email ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [confirmSent, setConfirmSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  if (user) return <Navigate to="/" replace />;
+  if (user) return <Navigate to={from} replace />;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -25,9 +29,9 @@ export function RegisterPage() {
     }
     setSubmitting(true);
     try {
-      const { needsConfirmation } = await signUp(fullName.trim(), email.trim(), password);
+      const { needsConfirmation } = await signUp(fullName.trim(), email.trim(), password, state?.from ?? '/login');
       if (needsConfirmation) setConfirmSent(true);
-      else navigate('/', { replace: true });
+      else navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear la cuenta.');
     } finally {
@@ -38,8 +42,10 @@ export function RegisterPage() {
   if (confirmSent) {
     return (
       <AuthLayout title="Revisa tu correo" subtitle={`Te enviamos un enlace de confirmación a ${email}.`}>
-        <p className="muted">Cuando confirmes tu cuenta podrás iniciar sesión.</p>
-        <Link to="/login" className="btn btn--primary btn--block">Ir a iniciar sesión</Link>
+        <p className="muted">
+          {state?.from ? 'Al confirmar tu cuenta volverás a la invitación para aceptarla.' : 'Cuando confirmes tu cuenta podrás iniciar sesión.'}
+        </p>
+        <Link to="/login" state={state} className="btn btn--primary btn--block">Ir a iniciar sesión</Link>
       </AuthLayout>
     );
   }
@@ -82,7 +88,7 @@ export function RegisterPage() {
       </form>
 
       <p className="auth__switch">
-        ¿Ya tienes cuenta? <Link to="/login" className="link">Inicia sesión</Link>
+        ¿Ya tienes cuenta? <Link to="/login" state={state} className="link">Inicia sesión</Link>
       </p>
     </AuthLayout>
   );

@@ -33,8 +33,9 @@ class Settings(BaseSettings):
     # Correo (invitaciones)
     # smtp   → servidor SMTP (local con Mailpit o un plan pagado de Render)
     # resend → API HTTPS de Resend (funciona en el plan gratis de Render)
+    # brevo  → API HTTPS de Brevo (gratis 300/día; basta verificar tu correo como remitente)
     # log    → no envía, solo escribe el enlace en los logs
-    email_provider: Literal["smtp", "resend", "log"] = "log"
+    email_provider: Literal["smtp", "resend", "brevo", "log"] = "log"
     email_from: str = "Arkio <no-reply@arkio.app>"
     smtp_host: str = ""
     smtp_port: int = 587
@@ -42,6 +43,7 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_starttls: bool = True
     resend_api_key: str = ""
+    brevo_api_key: str = ""
 
     invitation_ttl_hours: int = 72
 

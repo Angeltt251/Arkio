@@ -9,7 +9,8 @@ interface AuthContextValue {
   loading: boolean;
   isDemo: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (fullName: string, email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
+  /** `redirectPath`: a dónde vuelve el enlace de confirmación del correo (ej: una invitación). */
+  signUp: (fullName: string, email: string, password: string, redirectPath?: string) => Promise<{ needsConfirmation: boolean }>;
   sendPasswordReset: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -114,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw new Error(translateAuthError(error.message));
   }, []);
 
-  const signUp = useCallback(async (fullName: string, email: string, password: string) => {
+  const signUp = useCallback(async (fullName: string, email: string, password: string, redirectPath = '/login') => {
     if (!supabase) {
       const key = email.toLowerCase();
       const accounts = readDemoAccounts();
@@ -129,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: fullName }, emailRedirectTo: `${window.location.origin}/login` },
+      options: { data: { full_name: fullName }, emailRedirectTo: `${window.location.origin}${redirectPath}` },
     });
     if (error) throw new Error(translateAuthError(error.message));
     return { needsConfirmation: !data.session };

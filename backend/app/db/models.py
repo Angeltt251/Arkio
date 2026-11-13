@@ -24,6 +24,8 @@ PbiStatus = pg_enum("pbi_status", "new", "refined", "ready", "in_sprint", "done"
 Priority = pg_enum("priority_level", "low", "medium", "high", "critical")
 SprintStatus = pg_enum("sprint_status", "planned", "active", "closed", "cancelled")
 InvitationStatus = pg_enum("invitation_status", "pending", "accepted", "declined", "revoked", "expired")
+ScrumEventType = pg_enum("scrum_event_type", "sprint_planning", "daily_scrum", "sprint_review", "sprint_retrospective")
+ActionStatus = pg_enum("action_status", "pending", "in_progress", "done", "dropped")
 
 class Base(DeclarativeBase):
     pass
@@ -111,6 +113,19 @@ class BacklogItem(Base):
     rank: Mapped[float] = mapped_column(Float, default=0)
     estimate: Mapped[float | None] = mapped_column(Numeric(6, 2))
     status: Mapped[str] = mapped_column(PbiStatus, default="new")
+    story_as_a: Mapped[str | None] = mapped_column(Text)
+    story_i_want: Mapped[str | None] = mapped_column(Text)
+    story_so_that: Mapped[str | None] = mapped_column(Text)
+    parent_id: Mapped[UUID | None] = mapped_column(ForeignKey("backlog_items.id"))
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SprintItem(Base):
+    __tablename__ = "sprint_items"
+    sprint_id: Mapped[UUID] = mapped_column(ForeignKey("sprints.id"), primary_key=True)
+    backlog_item_id: Mapped[UUID] = mapped_column(ForeignKey("backlog_items.id"), primary_key=True)
 
 
 class Sprint(Base):
@@ -123,6 +138,9 @@ class Sprint(Base):
     end_date: Mapped[date] = mapped_column(Date)
     status: Mapped[str] = mapped_column(SprintStatus, default="planned")
     close_reason: Mapped[str | None] = mapped_column(Text)
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class BoardColumn(Base):
@@ -173,4 +191,69 @@ class ActivityLog(Base):
     entity_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     changes: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     source: Mapped[str] = mapped_column(Text, default="app")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"))
+    activity_id: Mapped[int | None] = mapped_column(BigInteger)
+    title: Mapped[str] = mapped_column(Text)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class ChecklistItem(Base):
+    __tablename__ = "checklist_items"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id"))
+    content: Mapped[str] = mapped_column(Text)
+    is_done: Mapped[bool] = mapped_column(Boolean, default=False)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class Comment(Base):
+    __tablename__ = "comments"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"))
+    task_id: Mapped[UUID | None] = mapped_column(ForeignKey("tasks.id"))
+    event_id: Mapped[UUID | None] = mapped_column(ForeignKey("scrum_events.id"))
+    author_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"))
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScrumEvent(Base):
+    __tablename__ = "scrum_events"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"))
+    sprint_id: Mapped[UUID] = mapped_column(ForeignKey("sprints.id"))
+    type: Mapped[str] = mapped_column(ScrumEventType)
+    held_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    duration_minutes: Mapped[int | None] = mapped_column(Integer)
+    notes: Mapped[str | None] = mapped_column(Text)
+    agreements: Mapped[str | None] = mapped_column(Text)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
+    created_by: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class EventAttendee(Base):
+    __tablename__ = "event_attendees"
+    event_id: Mapped[UUID] = mapped_column(ForeignKey("scrum_events.id"), primary_key=True)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"), primary_key=True)
+
+
+class RetroAction(Base):
+    __tablename__ = "retro_actions"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"))
+    event_id: Mapped[UUID] = mapped_column(ForeignKey("scrum_events.id"))
+    description: Mapped[str] = mapped_column(Text)
+    owner_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    due_date: Mapped[date | None] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(ActionStatus, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))

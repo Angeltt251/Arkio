@@ -204,6 +204,11 @@ def _recent_activity(db: Session, ids: list[UUID], limit: int = 8) -> list[Activ
         where a.project_id = any(:ids) and a.entity_type = any(:entities)
         order by a.id desc limit :limit""", ids=ids, entities=list(RELEVANT_ENTITIES), limit=limit)
 
+    return describe_activity(db, rows)
+
+
+def describe_activity(db: Session, rows: list[dict[str, Any]]) -> list[ActivityItem]:
+    """Convierte filas de `activity_log` (con actor_name) en frases legibles."""
     task_ids, column_ids, label_ids = set(), set(), set()
     for r in rows:
         ch = r["changes"] or {}
@@ -217,7 +222,6 @@ def _recent_activity(db: Session, ids: list[UUID], limit: int = 8) -> list[Activ
     titles = _lookup(db, "tasks", "title", task_ids)
     columns = _lookup(db, "board_columns", "name", column_ids)
     labels = _lookup(db, "labels", "name", label_ids)
-
     return [_describe(r, titles, columns, labels) for r in rows]
 
 

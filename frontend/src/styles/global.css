@@ -1388,3 +1388,5 @@ button:disabled {
 @media (max-width: 640px) {
   .member-row { flex-wrap: wrap; }
 }
+.invite-link--warn { background: var(--orange-bg); border-color: var(--orange-border); }
+.received { border-color: var(--primary); }

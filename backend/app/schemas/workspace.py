@@ -102,6 +102,16 @@ class ProjectMemberSet(CamelModel):
     role: ProjectRoleName
 
 
+class ReceivedInvitation(CamelModel):
+    id: UUID
+    workspace_name: str
+    project_name: str | None
+    invited_by: str
+    workspace_role: str
+    project_role: str | None
+    expires_at: datetime
+
+
 class InvitationPreview(CamelModel):
     workspace_name: str
     project_name: str | None

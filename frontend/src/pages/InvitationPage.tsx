@@ -51,14 +51,21 @@ export function InvitationPage() {
         user ? (
           <div className="form">
             <p className="muted">La invitación es para <strong>{preview.email}</strong>.</p>
+            {user.email.toLowerCase() !== preview.email.toLowerCase() && (
+              <p className="form__error" role="alert">
+                Iniciaste sesión como {user.email}. Cierra sesión y entra con {preview.email} para aceptarla.
+              </p>
+            )}
             <button className="btn btn--primary btn--block" disabled={busy} onClick={() => respond('accept')}>Aceptar invitación</button>
             <button className="btn btn--ghost btn--block" disabled={busy} onClick={() => respond('decline')}>Rechazar</button>
           </div>
         ) : (
           <div className="form">
             <p className="muted">Inicia sesión o crea una cuenta con <strong>{preview.email}</strong> para aceptarla.</p>
-            <Link className="btn btn--primary btn--block" to="/login" state={{ from: `/invitacion/${inviteToken}` }}>Iniciar sesión</Link>
-            <Link className="btn btn--ghost btn--block" to="/registro">Crear cuenta</Link>
+            <Link className="btn btn--primary btn--block" to="/login"
+              state={{ from: `/invitacion/${inviteToken}`, email: preview.email }}>Iniciar sesión</Link>
+            <Link className="btn btn--ghost btn--block" to="/registro"
+              state={{ from: `/invitacion/${inviteToken}`, email: preview.email }}>Crear cuenta</Link>
           </div>
         )
       )}

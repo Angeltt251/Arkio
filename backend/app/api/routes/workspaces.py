@@ -3,7 +3,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, UserDB
@@ -136,11 +136,9 @@ def list_invitations(workspace_id: UUID, user: CurrentUser, db: UserDB) -> list[
 
 @router.post("/{workspace_id}/invitations", response_model=InvitationOut, status_code=status.HTTP_201_CREATED)
 def create_invitation(
-    workspace_id: UUID, payload: InvitationCreate, background: BackgroundTasks, user: CurrentUser, db: UserDB
+    workspace_id: UUID, payload: InvitationCreate, user: CurrentUser, db: UserDB
 ) -> InvitationOut:
     require_workspace_admin(db, workspace_id, user.id)
-    workspace = db.get(Workspace, workspace_id)
-    project = None
     if payload.project_id:
         project = db.get(Project, payload.project_id)
         if project is None or project.workspace_id != workspace_id:
@@ -156,29 +154,57 @@ def create_invitation(
     if already:
         raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay una invitación pendiente para ese correo")
 
-    token = secrets.token_urlsafe(32)  # solo viaja en el correo; en la BD se guarda el hash
+    existing = db.scalar(
+        select(WorkspaceMember.status).join(Profile, Profile.id == WorkspaceMember.user_id)
+        .where(WorkspaceMember.workspace_id == workspace_id, Profile.email == email)
+    )
+    if existing == "active":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Esa persona ya es miembro activo del espacio")
+
     invitation = Invitation(
         workspace_id=workspace_id, project_id=payload.project_id, email=email,
         workspace_role=payload.workspace_role,
         project_role=payload.project_role or ("developer" if payload.project_id else None),
-        token_hash=hash_token(token), invited_by=user.id,
-        expires_at=datetime.now(timezone.utc) + timedelta(hours=settings.invitation_ttl_hours),
+        token_hash="", invited_by=user.id,
     )
     db.add(invitation)
+    return _issue_invitation(db, invitation, user.id)
+
+
+def _issue_invitation(db, invitation: Invitation, inviter_id: UUID) -> InvitationOut:
+    """Genera un token nuevo (en la BD solo queda su hash), renueva el vencimiento y envía el correo.
+    El enlace se devuelve una sola vez para poder copiarlo si el correo no llega."""
+    token = secrets.token_urlsafe(32)
+    invitation.token_hash = hash_token(token)
+    invitation.expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.invitation_ttl_hours)
     db.commit()
     db.refresh(invitation)
 
-    inviter = db.get(Profile, user.id)
+    workspace = db.get(Workspace, invitation.workspace_id)
+    project = db.get(Project, invitation.project_id) if invitation.project_id else None
+    inviter = db.get(Profile, inviter_id)
     link = f"{settings.frontend_url.rstrip('/')}/invitacion/{token}"
     subject, html, text_body = invitation_email(
         inviter=inviter.full_name or inviter.email, workspace=workspace.name,
         project=project.name if project else None, link=link, hours=settings.invitation_ttl_hours,
     )
-    background.add_task(send_email, email, subject, html, text_body)
     out = InvitationOut.model_validate(invitation)
     out.link = link
-    out.email_sent = settings.email_provider != "log"
+    out.email_sent = send_email(invitation.email, subject, html, text_body)
     return out
+
+
+@router.post("/{workspace_id}/invitations/{invitation_id}/resend", response_model=InvitationOut)
+def resend_invitation(workspace_id: UUID, invitation_id: UUID, user: CurrentUser, db: UserDB) -> InvitationOut:
+    """Reenvía el correo con un enlace nuevo (el anterior deja de funcionar) y extiende el vencimiento."""
+    require_workspace_admin(db, workspace_id, user.id)
+    invitation = db.get(Invitation, invitation_id)
+    if invitation is None or invitation.workspace_id != workspace_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Invitación no encontrada")
+    if invitation.status not in ("pending", "expired"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Solo se pueden reenviar invitaciones pendientes o vencidas")
+    invitation.status = "pending"
+    return _issue_invitation(db, invitation, user.id)
 
 
 @router.post("/{workspace_id}/invitations/{invitation_id}/revoke", status_code=status.HTTP_204_NO_CONTENT)

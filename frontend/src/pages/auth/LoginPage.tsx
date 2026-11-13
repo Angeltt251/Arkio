@@ -8,8 +8,9 @@ export function LoginPage() {
   const { user, signIn } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from ?? '/';
-  const [email, setEmail] = useState('');
+  const state = location.state as { from?: string; email?: string } | null;
+  const from = state?.from ?? '/';
+  const [email, setEmail] = useState(state?.email ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -62,7 +63,7 @@ export function LoginPage() {
       </form>
 
       <p className="auth__switch">
-        ¿No tienes cuenta? <Link to="/registro" className="link">Crear cuenta</Link>
+        ¿No tienes cuenta? <Link to="/registro" state={state} className="link">Crear cuenta</Link>
       </p>
     </AuthLayout>
   );
