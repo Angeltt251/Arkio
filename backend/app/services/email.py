@@ -89,7 +89,7 @@ def _send_brevo(to: str, subject: str, html: str, text: str) -> None:
     name, address = parseaddr(settings.email_from)
     response = httpx.post(
         "https://api.brevo.com/v3/smtp/email",
-        headers={"api-key": settings.brevo_api_key, "accept": "application/json"},
+        headers={"api-key": settings.brevo_api_key.strip(), "accept": "application/json"},
         json={
             "sender": {"name": name or "Arkio", "email": address},
             "to": [{"email": to}],
@@ -107,15 +107,17 @@ def _send_brevo(to: str, subject: str, html: str, text: str) -> None:
 def _brevo_reason(status: int, body: str) -> str:
     """Traduce los errores habituales de Brevo a una indicación de cómo resolverlos."""
     lower = body.lower()
-    if status == 401 or "key not found" in lower:
-        return "Brevo rechazó la API key (no existe o está mal copiada). Revisa BREVO_API_KEY en Render."
+    if "ip address" in lower or "authorised_ips" in lower or "authorized_ips" in lower:
+        return ("Brevo bloqueó la IP del servidor (Render). En Brevo → Security → Authorised IPs desactiva el "
+                "bloqueo de IPs desconocidas: Render usa IPs variables, así que agregarlas una por una no basta.")
     if "transactional" in lower or "permission_denied" in lower:
         return ("La API key de Brevo no tiene permiso para enviar correos. Crea una clave nueva con acceso completo "
                 "en Brevo (SMTP & API → API Keys) o activa los correos transaccionales de tu cuenta.")
     if "sender" in lower:
         return f"Brevo no acepta el remitente {settings.email_from}: verifícalo en Brevo → Senders."
-    if "ip" in lower and "authoriz" in lower:
-        return "Brevo bloqueó la IP del servidor: desactiva la restricción de IPs en Brevo → Security → Authorized IPs."
+    if status == 401 or "key not found" in lower:
+        return ("Brevo rechazó la API key (no existe o está mal copiada). Usa una clave de SMTP & API → API Keys "
+                "(empieza con xkeysib-) en BREVO_API_KEY de Render.")
     return f"Brevo respondió {status}: {body[:200]}"
 
 
