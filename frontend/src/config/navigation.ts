@@ -9,53 +9,24 @@ export interface NavItem {
   description?: string;
 }
 
-export const NAV_ITEMS: NavItem[] = [
+/** Secciones generales: no dependen de un proyecto. */
+export const GLOBAL_ITEMS: NavItem[] = [
   { to: '/', label: 'Inicio', icon: 'home' },
+  { to: '/espacios', label: 'Espacios de trabajo', icon: 'workspaces' },
+  { to: '/miembros', label: 'Miembros', icon: 'users' },
+];
+
+/** Secciones de un proyecto: el menú las abre con `?proyecto=` del proyecto elegido. */
+export const PROJECT_ITEMS: NavItem[] = [
   { to: '/backlog', label: 'Product Backlog', icon: 'list' },
   { to: '/sprints', label: 'Sprints', icon: 'rocket' },
-  {
-    to: '/tableros',
-    label: 'Tableros',
-    icon: 'boards',
-    iteration: 'Iteración 4 · Tablero',
-    description: 'Columnas configurables, tarjetas con responsables, etiquetas, checklist, límites WIP y bloqueos.',
-  },
+  { to: '/tableros', label: 'Tablero', icon: 'boards' },
   { to: '/eventos', label: 'Eventos Scrum', icon: 'calendar' },
-  {
-    to: '/plantillas',
-    label: 'Plantillas',
-    icon: 'templates',
-    iteration: 'Siguiente versión',
-    description: 'Proyectos y tableros preconfigurados para comenzar rápido.',
-  },
-  {
-    to: '/espacios',
-    label: 'Espacios de trabajo',
-    icon: 'workspaces',
-    iteration: 'Iteración 1 · Acceso y espacios',
-    description: 'Crear espacios y proyectos, con datos aislados entre espacios. La API ya está lista.',
-  },
-  {
-    to: '/miembros',
-    label: 'Miembros',
-    icon: 'users',
-    iteration: 'Iteración 1 · Acceso y espacios',
-    description: 'Invitar por correo con enlace y vencimiento, asignar roles Scrum y revocar accesos. La API ya está lista.',
-  },
-  {
-    to: '/bitacora',
-    label: 'Bitácora',
-    icon: 'logbook',
-    iteration: 'Iteración 5 · Trazabilidad',
-    description: 'Historial inmutable de quién hizo qué y cuándo, con filtros por integrante, fecha y entidad. La base de datos ya lo registra.',
-  },
-  {
-    to: '/reportes',
-    label: 'Reportes',
-    icon: 'reports',
-    iteration: 'Iteración 6 · Cierre e informes',
-    description: 'Informe de Sprint, retrospectiva y bitácora exportables a PDF y CSV.',
-  },
+  { to: '/bitacora', label: 'Bitácora', icon: 'logbook' },
+  { to: '/reportes', label: 'Reportes', icon: 'reports' },
+];
+
+export const SETTINGS_ITEMS: NavItem[] = [
   {
     to: '/configuracion',
     label: 'Configuración',
@@ -64,3 +35,5 @@ export const NAV_ITEMS: NavItem[] = [
     description: 'Perfil, avatar, tema, permisos del espacio y notificaciones.',
   },
 ];
+
+export const NAV_ITEMS: NavItem[] = [...GLOBAL_ITEMS, ...PROJECT_ITEMS, ...SETTINGS_ITEMS];

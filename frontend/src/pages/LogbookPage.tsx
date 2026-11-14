@@ -248,7 +248,7 @@ export function LogbookPage() {
         <div className="page-head"><div><h1>Bitácora</h1></div></div>
         <div className="empty">
           <p>Aún no tienes proyectos.</p>
-          <Link to="/plantillas" className="btn btn--primary btn--sm" style={{ justifySelf: 'center' }}>
+          <Link to="/espacios" className="btn btn--primary btn--sm" style={{ justifySelf: 'center' }}>
             <Icon name="plus" size={16} /> Crear un proyecto
           </Link>
         </div>

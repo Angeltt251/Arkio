@@ -9,7 +9,6 @@ import { ModulePlaceholder } from '@/pages/ModulePlaceholder';
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage';
 import { LoginPage } from '@/pages/auth/LoginPage';
 import { RegisterPage } from '@/pages/auth/RegisterPage';
-import { TemplatesPage } from '@/pages/TemplatesPage';
 import { BacklogPage } from '@/pages/BacklogPage';
 import { BoardsPage } from '@/pages/BoardsPage';
 import { EventsPage } from '@/pages/EventsPage';
@@ -20,7 +19,7 @@ import { MembersPage } from '@/pages/MembersPage';
 import { WorkspacesPage } from '@/pages/WorkspacesPage';
 import { ProtectedRoute } from '@/routes/ProtectedRoute';
 
-const BUILT_PAGES = ['/', '/espacios', '/tableros', '/miembros', '/plantillas', '/bitacora', '/backlog', '/sprints', '/eventos', '/reportes'];
+const BUILT_PAGES = ['/', '/espacios', '/tableros', '/miembros', '/bitacora', '/backlog', '/sprints', '/eventos', '/reportes'];
 
 export default function App() {
   return (
@@ -39,7 +38,6 @@ export default function App() {
                 <Route path="/espacios" element={<WorkspacesPage />} />
                 <Route path="/tableros" element={<BoardsPage />} />
                 <Route path="/miembros" element={<MembersPage />} />
-                <Route path="/plantillas" element={<TemplatesPage />} />
                 <Route path="/bitacora" element={<LogbookPage />} />
                 <Route path="/backlog" element={<BacklogPage />} />
                 <Route path="/sprints" element={<SprintsPage />} />
