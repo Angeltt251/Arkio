@@ -6,7 +6,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Project, ProjectMember, WorkspaceMember
+from app.db.models import Project, ProjectMember, Sprint, WorkspaceMember
+from app.schemas.workspace import ProjectOut
 
 ADMIN_ROLES = ("owner", "admin")
 
@@ -99,3 +100,18 @@ def accessible_project_ids(db: Session, user_id: UUID) -> list[UUID]:
         select(Project.id).where(Project.archived_at.is_(None), Project.id.in_(direct.union(via_admin)))
     )
     return list(rows.scalars())
+
+
+def project_outs(db: Session, projects: list[Project], user_id: UUID) -> list[ProjectOut]:
+    """Proyectos con lo que el usuario puede hacer con cada uno."""
+    ids = [p.id for p in projects]
+    with_sprints = set(db.scalars(select(Sprint.project_id).where(Sprint.project_id.in_(ids)).distinct())) if ids else set()
+    out = []
+    for p in projects:
+        ws_member = db.get(WorkspaceMember, (p.workspace_id, user_id))
+        is_admin = ws_member is not None and ws_member.status == "active" and ws_member.role in ADMIN_ROLES
+        item = ProjectOut.model_validate(p)
+        item.can_manage = can_manage(db, p, user_id)
+        item.can_delete = is_admin and p.id not in with_sprints
+        out.append(item)
+    return out

@@ -45,6 +45,15 @@ const PATHS = {
   ),
   reports: <path d="M4 20V13M10 20V8M16 20v-9M21 20H3M20 4l-5 5-3-3-5 5" />,
   download: <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />,
+  edit: <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16zM13.5 6.5l4 4" />,
+  archive: (
+    <>
+      <rect x="3" y="4" width="18" height="5" rx="1" />
+      <path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" />
+    </>
+  ),
+  trash: <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />,
+  undo: <path d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />,
   settings: (
     <>
       <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />

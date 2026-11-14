@@ -56,6 +56,20 @@ class ProjectOut(CamelModel):
     status: ProjectStatusName
     color: str
     created_at: datetime
+    archived_at: datetime | None = None
+    can_manage: bool = False  # editar, completar o archivar (PO, SM o admin del espacio)
+    can_delete: bool = False  # eliminar: admin del espacio y sin Sprints (los Sprints no se borran)
+
+
+class ProjectUpdate(CamelModel):
+    name: str | None = Field(None, min_length=2, max_length=120)
+    description: str | None = Field(None, max_length=500)
+    color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
+    status: ProjectStatusName | None = None
+
+
+class WorkspaceUpdate(CamelModel):
+    name: str = Field(min_length=2, max_length=80)
 
 
 class MemberOut(CamelModel):

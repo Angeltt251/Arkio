@@ -1,6 +1,6 @@
 import csv
 import io
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -8,12 +8,18 @@ from fastapi.responses import Response
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, UserDB
-from app.db.models import ActivityLog, Profile, Project, ProjectMember, WorkspaceMember
+from app.db.models import ActivityLog, Profile, Project, ProjectMember, Sprint, WorkspaceMember
 from app.schemas.logbook import LogActor, LogbookPage
-from app.schemas.workspace import ActivityOut, ProjectMemberOut, ProjectMemberSet, ProjectOut
+from app.schemas.workspace import ActivityOut, ProjectMemberOut, ProjectMemberSet, ProjectOut, ProjectUpdate
 from app.services.dashboard import TZ
 from app.services.logbook import CATEGORIES, logbook_actors, query_logbook
-from app.services.permissions import accessible_project_ids, project_access, require_project_manager
+from app.services.permissions import (
+    ADMIN_ROLES,
+    accessible_project_ids,
+    project_access,
+    project_outs,
+    require_project_manager,
+)
 
 router = APIRouter(prefix="/projects", tags=["proyectos y bitácora"])
 
@@ -28,6 +34,71 @@ def list_my_projects(user: CurrentUser, db: UserDB) -> list[Project]:
 @router.get("/{project_id}", response_model=ProjectOut)
 def get_project(project_id: UUID, user: CurrentUser, db: UserDB) -> Project:
     return project_access(db, project_id, user.id)
+
+
+def _active_sprint_guard(db, project_id: UUID, action: str) -> None:
+    active = db.scalar(select(Sprint.number).where(Sprint.project_id == project_id, Sprint.status == "active"))
+    if active:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"El Sprint #{active} sigue en curso: ciérralo antes de {action}")
+
+
+@router.patch("/{project_id}", response_model=ProjectOut)
+def update_project(project_id: UUID, payload: ProjectUpdate, user: CurrentUser, db: UserDB) -> ProjectOut:
+    """Editar nombre, descripción, color o estado (Completado = `closed`). PO, SM o admin del espacio."""
+    project = require_project_manager(db, project_id, user.id)
+    changes = payload.model_dump(exclude_unset=True)
+    if changes.get("status") == "closed" and project.status != "closed":
+        _active_sprint_guard(db, project_id, "marcar el proyecto como completado")
+    if "name" in changes and changes["name"]:
+        changes["name"] = changes["name"].strip()
+    if "description" in changes:
+        changes["description"] = (changes["description"] or "").strip() or None
+    for field, value in changes.items():
+        if value is not None or field == "description":
+            setattr(project, field, value)
+    db.commit()
+    db.refresh(project)
+    return project_outs(db, [project], user.id)[0]
+
+
+@router.post("/{project_id}/archive", response_model=ProjectOut)
+def archive_project(project_id: UUID, user: CurrentUser, db: UserDB) -> ProjectOut:
+    """Guarda el proyecto fuera de la vista: deja de aparecer en el menú, pero conserva toda su historia."""
+    project = require_project_manager(db, project_id, user.id)
+    _active_sprint_guard(db, project_id, "archivar el proyecto")
+    project.archived_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(project)
+    return project_outs(db, [project], user.id)[0]
+
+
+@router.post("/{project_id}/restore", response_model=ProjectOut)
+def restore_project(project_id: UUID, user: CurrentUser, db: UserDB) -> ProjectOut:
+    project = require_project_manager(db, project_id, user.id)
+    project.archived_at = None
+    db.commit()
+    db.refresh(project)
+    return project_outs(db, [project], user.id)[0]
+
+
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project(
+    project_id: UUID, user: CurrentUser, db: UserDB,
+    confirm: str = Query(..., description="Clave del proyecto, para confirmar"),
+) -> None:
+    """Elimina el proyecto para siempre. Solo admins del espacio y solo si no tiene Sprints:
+    la historia de los Sprints no se borra (esos proyectos se archivan). La bitácora conserva el registro."""
+    project = project_access(db, project_id, user.id)
+    ws_member = db.get(WorkspaceMember, (project.workspace_id, user.id))
+    if ws_member.role not in ADMIN_ROLES:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo propietarios o administradores del espacio pueden eliminar proyectos")
+    if confirm.strip().upper() != project.key:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Escribe la clave del proyecto para confirmar")
+    if db.scalar(select(Sprint.id).where(Sprint.project_id == project_id).limit(1)):
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Este proyecto tiene Sprints y su historia no se borra. Archívalo en su lugar.")
+    db.delete(project)
+    db.commit()
 
 
 @router.get("/{project_id}/activity", response_model=list[ActivityOut])

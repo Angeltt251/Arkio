@@ -1560,6 +1560,18 @@ img, svg { max-width: 100%; }
 
 .chip--plain { padding: 0.4rem 0.9rem; }
 
+/* espacios: pestañas y acciones de proyectos */
+.project-tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.9rem; }
+.project-tabs__count { font-size: 0.72rem; opacity: 0.7; }
+.project-card__link { color: inherit; }
+.project-card__link:hover { color: var(--primary); text-decoration: underline; }
+.project-card--archived { opacity: 0.75; }
+.project-card__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin-top: auto; }
+.project-card__actions .btn--sm { padding: 0.3rem 0.6rem; font-size: 0.78rem; }
+.project-card__delete { margin-left: auto; }
+.project-card__delete:hover:not(:disabled) { color: #d1343a; background: rgba(229, 72, 77, 0.08); }
+.workspace-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.7rem; }
+
 /* ------------------------------------------------------------ bitácora */
 .logbook__actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 

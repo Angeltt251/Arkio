@@ -69,6 +69,8 @@ Arkio/
 - **Tablero**: además de columnas y WIP, las tarjetas tienen etiquetas (con texto, no solo color), checklist con progreso y PBI/Sprint asociado.
 - **Reportes**: vista previa de cada Sprint (cumplimiento del Sprint Goal, avance, burndown, entregado y pendiente) y PDF descargable generado en el backend con `reportlab`, en dos versiones: *para el cliente* (avance, entregables, Sprint Review, próximos pasos y equipo) y *uso interno* (además tareas con responsables, impedimentos de las Daily, Retrospectiva, acciones de mejora y contribuciones, no como ranking). Admite un nombre de cliente y un mensaje inicial. Informe PDF del proyecto (velocidad, comprometido vs. terminado por Sprint, historial y estado del backlog) y CSV del Product Backlog, Sprints, tareas y Sprint Backlog de cada Sprint, acciones de mejora y bitácora.
 
+- **Espacios de trabajo**: editar proyectos, marcarlos como completados (y reabrirlos), archivarlos (salen del menú y de Miembros, sin perder nada) y restaurarlos. Un proyecto sin Sprints se puede eliminar escribiendo su clave; uno con Sprints solo se archiva, para conservar su historia. Renombrar el espacio (administradores) y eliminarlo (solo el propietario, escribiendo su nombre).
+
 Las demás secciones del menú muestran una página que indica en qué iteración se construyen.
 
 ## Puesta en marcha

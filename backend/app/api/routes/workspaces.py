@@ -3,12 +3,12 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, UserDB
 from app.core.config import settings
-from app.db.models import Invitation, Profile, Project, ProjectMember, Workspace, WorkspaceMember
+from app.db.models import Invitation, Profile, Project, ProjectMember, Sprint, Workspace, WorkspaceMember
 from app.schemas.workspace import (
     InvitationCreate,
     InvitationOut,
@@ -18,9 +18,10 @@ from app.schemas.workspace import (
     ProjectOut,
     WorkspaceCreate,
     WorkspaceOut,
+    WorkspaceUpdate,
 )
 from app.services.email import invitation_email, send_email
-from app.services.permissions import require_workspace_admin, workspace_membership
+from app.services.permissions import project_outs, require_workspace_admin, workspace_membership
 from app.services.templates import TEMPLATES_BY_ID, apply_template
 
 router = APIRouter(prefix="/workspaces", tags=["espacios de trabajo"])
@@ -46,18 +47,53 @@ def create_workspace(payload: WorkspaceCreate, user: CurrentUser, db: UserDB) ->
     return WorkspaceOut(id=workspace.id, name=workspace.name, role="owner", created_at=workspace.created_at)
 
 
+@router.patch("/{workspace_id}", response_model=WorkspaceOut)
+def rename_workspace(workspace_id: UUID, payload: WorkspaceUpdate, user: CurrentUser, db: UserDB) -> WorkspaceOut:
+    member = require_workspace_admin(db, workspace_id, user.id)
+    workspace = db.get(Workspace, workspace_id)
+    workspace.name = payload.name.strip()
+    db.commit()
+    return WorkspaceOut(id=workspace.id, name=workspace.name, role=member.role, created_at=workspace.created_at)
+
+
+@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_workspace(
+    workspace_id: UUID, user: CurrentUser, db: UserDB,
+    confirm: str = Query(..., description="Nombre del espacio, para confirmar"),
+) -> None:
+    """Elimina el espacio y sus proyectos. Solo el propietario, y solo si ningún proyecto tiene Sprints
+    (la historia de los Sprints no se borra: esos proyectos se archivan)."""
+    member = workspace_membership(db, workspace_id, user.id)
+    if member.role != "owner":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Solo el propietario puede eliminar el espacio")
+    workspace = db.get(Workspace, workspace_id)
+    if confirm.strip() != workspace.name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Escribe el nombre exacto del espacio para confirmar")
+    with_sprints = db.scalars(
+        select(Project.name).where(Project.workspace_id == workspace_id, Project.id.in_(select(Sprint.project_id)))
+    ).all()
+    if with_sprints:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Estos proyectos tienen Sprints y su historia no se borra: {', '.join(with_sprints)}. Archívalos en su lugar.",
+        )
+    db.delete(workspace)
+    db.commit()
+
+
 # ------------------------------------------------------------------ proyectos
 @router.get("/{workspace_id}/projects", response_model=list[ProjectOut])
-def list_projects(workspace_id: UUID, user: CurrentUser, db: UserDB) -> list[Project]:
+def list_projects(workspace_id: UUID, user: CurrentUser, db: UserDB) -> list[ProjectOut]:
+    """Todos los proyectos visibles del espacio, también completados y archivados (el frontend los separa)."""
     member = workspace_membership(db, workspace_id, user.id)
-    query = select(Project).where(Project.workspace_id == workspace_id, Project.archived_at.is_(None))
+    query = select(Project).where(Project.workspace_id == workspace_id)
     if member.role == "member":  # los miembros comunes solo ven proyectos donde participan
         query = query.join(ProjectMember, ProjectMember.project_id == Project.id).where(ProjectMember.user_id == user.id)
-    return list(db.scalars(query.order_by(Project.created_at)))
+    return project_outs(db, list(db.scalars(query.order_by(Project.created_at))), user.id)
 
 
 @router.post("/{workspace_id}/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
-def create_project(workspace_id: UUID, payload: ProjectCreate, user: CurrentUser, db: UserDB) -> Project:
+def create_project(workspace_id: UUID, payload: ProjectCreate, user: CurrentUser, db: UserDB) -> ProjectOut:
     workspace_membership(db, workspace_id, user.id)
     if payload.template not in TEMPLATES_BY_ID:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"La plantilla «{payload.template}» no existe")
@@ -75,7 +111,7 @@ def create_project(workspace_id: UUID, payload: ProjectCreate, user: CurrentUser
     db.add(ProjectMember(project_id=project.id, user_id=user.id, role=payload.my_role))
     db.commit()
     db.refresh(project)
-    return project
+    return project_outs(db, [project], user.id)[0]
 
 
 # ------------------------------------------------------------------ miembros

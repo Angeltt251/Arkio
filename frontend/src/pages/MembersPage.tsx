@@ -40,6 +40,7 @@ interface Invitation {
 interface Project {
   id: string;
   name: string;
+  archivedAt: string | null;
 }
 
 interface Received {
@@ -105,7 +106,7 @@ export function MembersPage() {
         apiFetch<Project[]>(`/api/workspaces/${workspaceId}/projects`, token),
       ]);
       setMembers(m);
-      setProjects(p);
+      setProjects(p.filter((project) => !project.archivedAt));
       setInvitations(isAdmin ? await apiFetch<Invitation[]>(`/api/workspaces/${workspaceId}/invitations`, token) : []);
       setError(null);
     } catch (err) {
