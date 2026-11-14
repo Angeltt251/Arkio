@@ -3,6 +3,7 @@ import { Icon } from '@/components/ui/Icon';
 import { useAuth } from '@/context/AuthContext';
 import { apiFetch } from '@/lib/api';
 import { PROJECT_STATUS_LABEL } from '@/lib/format';
+import { PROJECT_COLORS, suggestKey, type ProjectTemplate } from '@/lib/projects';
 import type { ProjectRole, ProjectStatus } from '@/types';
 
 interface Workspace {
@@ -22,21 +23,12 @@ interface Project {
   color: string;
 }
 
-const COLORS = ['#447794', '#2D5B75', '#123249', '#27AE60', '#F2994A', '#EB5757'];
-
 const ROLE_LABEL: Record<ProjectRole, string> = {
   product_owner: 'Product Owner',
   scrum_master: 'Scrum Master',
   developer: 'Developer',
   observer: 'Observador',
 };
-
-/** Clave sugerida a partir del nombre: "Sistema de Ventas" → "SDV". */
-function suggestKey(name: string): string {
-  const words = name.normalize('NFD').replace(/[^A-Za-z0-9 ]/g, '').trim().split(/\s+/).filter(Boolean);
-  const key = words.length > 1 ? words.map((w) => w[0]).join('') : (words[0] ?? '').slice(0, 3);
-  return key.toUpperCase().replace(/^[0-9]+/, '').slice(0, 6);
-}
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
@@ -59,8 +51,10 @@ export function WorkspacesPage() {
   const [projectKey, setProjectKey] = useState('');
   const [keyTouched, setKeyTouched] = useState(false);
   const [description, setDescription] = useState('');
-  const [color, setColor] = useState(COLORS[0]);
+  const [color, setColor] = useState(PROJECT_COLORS[0]);
   const [myRole, setMyRole] = useState<ProjectRole>('product_owner');
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+  const [template, setTemplate] = useState('scrum');
   const [projectError, setProjectError] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
 
@@ -92,6 +86,11 @@ export function WorkspacesPage() {
   }, [loadWorkspaces]);
 
   useEffect(() => {
+    if (!token || isDemo) return;
+    apiFetch<ProjectTemplate[]>('/api/templates', token).then(setTemplates).catch(() => setTemplates([]));
+  }, [token, isDemo]);
+
+  useEffect(() => {
     void loadProjects();
   }, [loadProjects]);
 
@@ -120,8 +119,9 @@ export function WorkspacesPage() {
     setProjectKey('');
     setKeyTouched(false);
     setDescription('');
-    setColor(COLORS[0]);
+    setColor(PROJECT_COLORS[0]);
     setMyRole('product_owner');
+    setTemplate('scrum');
     setProjectError(null);
   };
 
@@ -139,6 +139,7 @@ export function WorkspacesPage() {
           description: description.trim() || null,
           color,
           myRole,
+          template,
         }),
       });
       setProjects((list) => [...list, project]);
@@ -238,7 +239,7 @@ export function WorkspacesPage() {
                 <div className="field">
                   <span>Color</span>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    {COLORS.map((c) => (
+                    {PROJECT_COLORS.map((c) => (
                       <button key={c} type="button" aria-label={`Color ${c}`} aria-pressed={color === c}
                         onClick={() => setColor(c)}
                         style={{
@@ -248,6 +249,20 @@ export function WorkspacesPage() {
                     ))}
                   </div>
                 </div>
+
+                {templates.length > 0 && (
+                  <label className="field">
+                    <span>Plantilla</span>
+                    <select className="select" value={template} onChange={(e) => setTemplate(e.target.value)}>
+                      {templates.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                    <span className="muted small" style={{ fontWeight: 500 }}>
+                      {templates.find((t) => t.id === template)?.columns.map((c) => c.name).join(' → ')}
+                    </span>
+                  </label>
+                )}
 
                 <label className="field">
                   <span>Mi rol en el proyecto</span>

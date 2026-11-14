@@ -21,6 +21,7 @@ from app.schemas.workspace import (
 )
 from app.services.email import invitation_email, send_email
 from app.services.permissions import require_workspace_admin, workspace_membership
+from app.services.templates import TEMPLATES_BY_ID, apply_template
 
 router = APIRouter(prefix="/workspaces", tags=["espacios de trabajo"])
 
@@ -58,6 +59,8 @@ def list_projects(workspace_id: UUID, user: CurrentUser, db: UserDB) -> list[Pro
 @router.post("/{workspace_id}/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(workspace_id: UUID, payload: ProjectCreate, user: CurrentUser, db: UserDB) -> Project:
     workspace_membership(db, workspace_id, user.id)
+    if payload.template not in TEMPLATES_BY_ID:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"La plantilla «{payload.template}» no existe")
     exists = db.scalar(select(Project.id).where(Project.workspace_id == workspace_id, Project.key == payload.key))
     if exists:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Ya existe un proyecto con la clave {payload.key}")
@@ -68,6 +71,7 @@ def create_project(workspace_id: UUID, payload: ProjectCreate, user: CurrentUser
     )
     db.add(project)
     db.flush()  # el trigger crea el tablero con columnas por defecto
+    apply_template(db, project, payload.template, user.id)  # columnas y tareas iniciales
     db.add(ProjectMember(project_id=project.id, user_id=user.id, role=payload.my_role))
     db.commit()
     db.refresh(project)

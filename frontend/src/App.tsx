@@ -9,6 +9,7 @@ import { ModulePlaceholder } from '@/pages/ModulePlaceholder';
 import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage';
 import { LoginPage } from '@/pages/auth/LoginPage';
 import { RegisterPage } from '@/pages/auth/RegisterPage';
+import { TemplatesPage } from '@/pages/TemplatesPage';
 import { BoardsPage } from '@/pages/BoardsPage';
 import { MembersPage } from '@/pages/MembersPage';
 import { WorkspacesPage } from '@/pages/WorkspacesPage';
@@ -31,7 +32,8 @@ export default function App() {
                 <Route path="/espacios" element={<WorkspacesPage />} />
                 <Route path="/tableros" element={<BoardsPage />} />
                 <Route path="/miembros" element={<MembersPage />} />
-                {NAV_ITEMS.filter((item) => !['/', '/espacios', '/tableros', '/miembros'].includes(item.to)).map((item) => (
+                <Route path="/plantillas" element={<TemplatesPage />} />
+                {NAV_ITEMS.filter((item) => !['/', '/espacios', '/tableros', '/miembros', '/plantillas'].includes(item.to)).map((item) => (
                   <Route key={item.to} path={item.to} element={<ModulePlaceholder item={item} />} />
                 ))}
               </Route>

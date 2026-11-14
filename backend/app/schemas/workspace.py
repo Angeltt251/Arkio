@@ -43,6 +43,7 @@ class ProjectCreate(CamelModel):
     product_goal: str | None = None
     color: str = Field(default="#447794", pattern=r"^#[0-9A-Fa-f]{6}$")
     my_role: ProjectRoleName = "product_owner"
+    template: str = Field(default="scrum", description="Plantilla de columnas y tareas iniciales (GET /api/templates)")
 
 
 class ProjectOut(CamelModel):
@@ -132,3 +133,25 @@ class ActivityOut(CamelModel):
     changes: dict
     source: str
     created_at: datetime
+
+
+class TemplateColumnOut(CamelModel):
+    name: str
+    wip_limit: int | None
+    is_done: bool
+
+
+class TemplateTaskOut(CamelModel):
+    title: str
+    column: str
+    priority: str
+
+
+class TemplateOut(CamelModel):
+    id: str
+    name: str
+    description: str
+    category: str
+    icon: str
+    columns: list[TemplateColumnOut]
+    tasks: list[TemplateTaskOut]

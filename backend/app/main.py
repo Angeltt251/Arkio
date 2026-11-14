@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import boards, invitations, me, projects, realtime, workspaces
+from app.api.routes import boards, invitations, me, projects, realtime, templates, workspaces
 from app.core.config import settings
 from app.services.realtime import hub, listen_activity
 
@@ -45,6 +45,6 @@ def health() -> dict:
     return {"status": "ok", "app": settings.app_name, "realtime_connections": hub.connection_count()}
 
 
-for module in (me, workspaces, projects, boards, invitations):
+for module in (me, workspaces, projects, boards, templates, invitations):
     app.include_router(module.router, prefix="/api")
 app.include_router(realtime.router)

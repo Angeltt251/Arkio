@@ -1499,3 +1499,51 @@ img, svg { max-width: 100%; }
 @media (max-width: 640px) {
   .board-col__menu { width: 38px; height: 38px; }
 }
+
+/* ------------------------------------------------------------ plantillas */
+.templates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: 1rem;
+}
+
+.template-card { display: grid; gap: 0.85rem; align-content: start; }
+.template-card__head { display: flex; gap: 0.8rem; align-items: center; }
+.template-card__head h2 { font-size: 1.02rem; font-weight: 700; margin-bottom: 0.25rem; }
+
+.template-card__icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.template-cols { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+
+.template-col {
+  padding: 0.25rem 0.6rem;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.template-col--done { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+
+.template-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.25rem;
+}
+
+.template-card__foot .link { background: none; border: none; padding: 0; cursor: pointer; }
+.chip--plain { padding: 0.4rem 0.9rem; }
