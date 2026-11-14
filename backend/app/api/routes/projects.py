@@ -1,12 +1,18 @@
-from datetime import datetime
+import csv
+import io
+from datetime import date, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import select
 
 from app.api.deps import CurrentUser, UserDB
 from app.db.models import ActivityLog, Profile, Project, ProjectMember, WorkspaceMember
+from app.schemas.logbook import LogActor, LogbookPage
 from app.schemas.workspace import ActivityOut, ProjectMemberOut, ProjectMemberSet, ProjectOut
+from app.services.dashboard import TZ
+from app.services.logbook import CATEGORIES, logbook_actors, query_logbook
 from app.services.permissions import accessible_project_ids, project_access, require_project_manager
 
 router = APIRouter(prefix="/projects", tags=["proyectos y bitácora"])
@@ -63,6 +69,65 @@ def project_activity(
         for log, name in rows
     ]
 
+
+# ------------------------------------------------------------------ bitácora legible
+@router.get("/{project_id}/logbook", response_model=LogbookPage)
+def project_logbook(
+    project_id: UUID,
+    user: CurrentUser,
+    db: UserDB,
+    limit: int = Query(50, ge=1, le=1000),
+    before_id: int | None = Query(None, description="Paginación: registros anteriores a este id"),
+    actor_id: UUID | None = None,
+    category: str | None = Query(None, description=f"Una de: {', '.join(CATEGORIES)}"),
+    since: date | None = None,
+    until: date | None = None,
+    q: str | None = Query(None, max_length=100),
+) -> LogbookPage:
+    """Bitácora con frases legibles y detalle antes/después. Solo lectura (también para observadores)."""
+    project_access(db, project_id, user.id)
+    items = query_logbook(db, project_id, limit=limit + 1, before_id=before_id, actor_id=actor_id,
+                          category=category, since=since, until=until, q=q)
+    has_more = len(items) > limit
+    items = items[:limit]
+    return LogbookPage(
+        items=items,
+        next_before_id=items[-1].id if has_more else None,
+        actors=[LogActor(id=a["id"], name=a["name"]) for a in logbook_actors(db, project_id)],
+    )
+
+
+@router.get("/{project_id}/logbook.csv")
+def project_logbook_csv(
+    project_id: UUID,
+    user: CurrentUser,
+    db: UserDB,
+    actor_id: UUID | None = None,
+    category: str | None = None,
+    since: date | None = None,
+    until: date | None = None,
+    q: str | None = Query(None, max_length=100),
+) -> Response:
+    """Exporta la bitácora filtrada (hasta 10.000 registros) en CSV compatible con Excel."""
+    project = project_access(db, project_id, user.id)
+    items = query_logbook(db, project_id, limit=10_000, actor_id=actor_id, category=category,
+                          since=since, until=until, q=q)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerow(["Fecha", "Hora", "Integrante", "Acción", "Elemento", "Descripción", "Cambios", "Origen"])
+    for e in items:
+        local = e.created_at.astimezone(TZ)
+        detail = " | ".join(f"{c.field}: {c.old or '—'} → {c.new or '—'}" for c in e.changes)
+        writer.writerow([
+            local.strftime("%d-%m-%Y"), local.strftime("%H:%M:%S"), e.actor_name, e.action_label, e.entity_label,
+            f"{e.actor_name} {e.message}{' ' + e.highlight if e.highlight else ''}", detail, e.source,
+        ])
+    filename = f"bitacora-{project.key}-{datetime.now(TZ):%Y%m%d}.csv"
+    return Response(
+        content="\ufeff" + buffer.getvalue(),  # BOM: Excel reconoce los acentos
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 # ------------------------------------------------------------------ equipo del proyecto
 @router.get("/{project_id}/members", response_model=list[ProjectMemberOut])

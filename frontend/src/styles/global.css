@@ -1547,3 +1547,116 @@ img, svg { max-width: 100%; }
 
 .template-card__foot .link { background: none; border: none; padding: 0; cursor: pointer; }
 .chip--plain { padding: 0.4rem 0.9rem; }
+
+/* ------------------------------------------------------------ bitácora */
+.logbook__actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+
+.logbook__filters {
+  display: grid;
+  grid-template-columns: minmax(200px, 2fr) repeat(4, minmax(130px, 1fr)) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.logbook__filters .field { font-size: 0.8rem; }
+.logbook__filters .input input { padding: 0.55rem 0; }
+.logbook__filters .select { width: 100%; padding: 0.55rem 0.6rem; }
+.logbook__clear { align-self: end; }
+
+.log-day { margin-bottom: 1.4rem; }
+
+.log-day__title {
+  position: sticky;
+  top: 72px;
+  z-index: 2;
+  display: inline-block;
+  margin-bottom: 0.6rem;
+  padding: 0.25rem 0.75rem;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.log-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+
+.log-item {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+}
+
+.log-item--create { border-left-color: var(--green); }
+.log-item--move { border-left-color: var(--primary); }
+.log-item--update { border-left-color: var(--orange); }
+.log-item--comment { border-left-color: var(--blue); }
+
+.log-item__body { flex: 1; min-width: 0; display: grid; gap: 0.35rem; }
+.log-item__body p { font-size: 0.9rem; line-height: 1.45; overflow-wrap: anywhere; }
+.log-item__hl { font-weight: 700; color: var(--primary); }
+
+.log-item__meta { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.75rem; color: var(--muted); }
+.log-item__toggle { background: none; border: none; padding: 0; cursor: pointer; font-size: 0.78rem; }
+
+.log-tag {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.log-tag--soft { background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+.log-tag--warn { background: var(--orange-bg); color: var(--orange); }
+
+.log-changes {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.3rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.log-changes th, .log-changes td { padding: 0.4rem 0.6rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+.log-changes th { background: var(--surface-2); color: var(--muted); font-weight: 600; }
+.log-changes td { overflow-wrap: anywhere; }
+.log-changes__old { color: var(--muted); text-decoration: line-through; }
+.log-changes__new { font-weight: 600; }
+
+.print-only { display: none; }
+
+@media (max-width: 1100px) {
+  .logbook__filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .logbook__filters .field:first-child { grid-column: 1 / -1; }
+}
+
+@media (max-width: 640px) {
+  .logbook__filters { grid-template-columns: 1fr; }
+  .logbook__actions .btn { flex: 1; }
+  .log-day__title { top: 64px; }
+}
+
+/* Impresión / Guardar como PDF: solo la bitácora */
+@media print {
+  @page { margin: 14mm; }
+  body { background: #fff; color: #000; }
+  .sidebar, .topbar, .backdrop, .no-print { display: none !important; }
+  .app { display: block; }
+  .content { padding: 0; max-width: none; }
+  .print-only { display: block; font-size: 10pt; }
+  .print-only h1 { font-size: 16pt; margin-bottom: 4pt; }
+  .print-only > p { color: #444; margin-bottom: 10pt; }
+  .log-print { width: 100%; border-collapse: collapse; }
+  .log-print th, .log-print td { border: 1px solid #bbb; padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  .log-print th { background: #e4eef4; }
+  .log-print tr { break-inside: avoid; }
+  .log-print ul { margin: 3pt 0 0; padding-left: 12pt; color: #333; }
+}

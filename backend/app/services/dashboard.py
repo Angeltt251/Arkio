@@ -209,20 +209,45 @@ def _recent_activity(db: Session, ids: list[UUID], limit: int = 8) -> list[Activ
 
 def describe_activity(db: Session, rows: list[dict[str, Any]]) -> list[ActivityItem]:
     """Convierte filas de `activity_log` (con actor_name) en frases legibles."""
-    task_ids, column_ids, label_ids = set(), set(), set()
+    refs = collect_refs(db, rows)
+    return [_describe(r, refs) for r in rows]
+
+
+def _uuid(value: Any) -> UUID | None:
+    try:
+        return UUID(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def _new(ch: dict[str, Any], key: str) -> Any:
+    """Valor nuevo de un campo: en una edición viene como {old, new}; al crear, directo."""
+    value = ch.get(key)
+    return value.get("new") if isinstance(value, dict) and "new" in value else value
+
+
+def collect_refs(db: Session, rows: list[dict[str, Any]]) -> dict[str, dict[UUID, str]]:
+    """Busca de una vez los nombres de tareas, columnas, etiquetas, personas y sprints mencionados."""
+    ids: dict[str, set[UUID]] = defaultdict(set)
     for r in rows:
         ch = r["changes"] or {}
-        if r["entity_type"] in ("tasks", "task_assignees", "task_labels") and r["entity_id"]:
-            task_ids.add(r["entity_id"])
-        if isinstance(ch.get("column_id"), dict) and ch["column_id"].get("new"):
-            column_ids.add(UUID(ch["column_id"]["new"]))
-        if ch.get("label_id"):
-            label_ids.add(UUID(ch["label_id"]))
-
-    titles = _lookup(db, "tasks", "title", task_ids)
-    columns = _lookup(db, "board_columns", "name", column_ids)
-    labels = _lookup(db, "labels", "name", label_ids)
-    return [_describe(r, titles, columns, labels) for r in rows]
+        if r["entity_type"] in ("tasks", "task_assignees", "task_labels", "checklist_items") and r["entity_id"]:
+            ids["tasks"].add(r["entity_id"])
+        if r["entity_type"] == "board_columns" and r["entity_id"]:
+            ids["columns"].add(r["entity_id"])
+        for key, bucket in (("column_id", "columns"), ("label_id", "labels"), ("user_id", "people"),
+                            ("owner_id", "people"), ("sprint_id", "sprints"), ("task_id", "tasks")):
+            raw = ch.get(key)
+            for value in (raw.get("old"), raw.get("new")) if isinstance(raw, dict) else (raw,):
+                if (uid := _uuid(value)) is not None:
+                    ids[bucket].add(uid)
+    return {
+        "tasks": _lookup(db, "tasks", "title", ids["tasks"]),
+        "columns": _lookup(db, "board_columns", "name", ids["columns"]),
+        "labels": _lookup(db, "labels", "name", ids["labels"]),
+        "people": _lookup(db, "profiles", "coalesce(nullif(full_name, ''), email)", ids["people"]),
+        "sprints": _lookup(db, "sprints", "'Sprint #' || number", ids["sprints"]),
+    }
 
 
 def _lookup(db: Session, table: str, column: str, ids: set[UUID]) -> dict[UUID, str]:
@@ -232,51 +257,83 @@ def _lookup(db: Session, table: str, column: str, ids: set[UUID]) -> dict[UUID, 
     return {row.id: row.v for row in result}
 
 
-def _describe(r: dict[str, Any], titles: dict, columns: dict, labels: dict) -> ActivityItem:
+ROLE_ES = {"product_owner": "Product Owner", "scrum_master": "Scrum Master", "developer": "Developer",
+           "observer": "Observador", "owner": "Propietario", "admin": "Administrador", "member": "Miembro"}
+INVITATION_ES = {"pending": "pendiente", "accepted": "aceptada", "declined": "rechazada", "revoked": "revocada",
+                 "expired": "vencida"}
+
+
+def _describe(r: dict[str, Any], refs: dict[str, dict[UUID, str]]) -> ActivityItem:
     ch: dict[str, Any] = r["changes"] or {}
     entity, action = r["entity_type"], r["action"]
-    title = titles.get(r["entity_id"]) or ch.get("title") or "una tarjeta"
+    entity_id = r["entity_id"]
+    title = refs["tasks"].get(entity_id) or _new(ch, "title") or "una tarjeta"
+    person = refs["people"].get(_uuid(_new(ch, "user_id"))) or "un integrante"
     highlight, kind = None, "other"
 
     if entity == "tasks" and action == "moved":
         message, kind = f"movió la tarjeta “{title}” a", "move"
-        highlight = columns.get(UUID(ch["column_id"]["new"])) if ch.get("column_id", {}).get("new") else None
+        highlight = refs["columns"].get(_uuid(_new(ch, "column_id")))
     elif entity == "tasks" and action == "created":
         message, kind = f"creó la tarjeta “{title}”", "create"
     elif entity == "tasks" and action in ("archived", "restored"):
         verb = "archivó" if action == "archived" else "restauró"
         message, kind = f"{verb} la tarjeta “{title}”", "update"
+    elif entity == "tasks" and action == "deleted":
+        message, kind = f"eliminó la tarjeta “{title}”", "update"
     elif entity == "tasks":
         message, kind = f"actualizó la tarjeta “{title}”", "update"
+    elif entity == "board_columns":
+        name = _new(ch, "name") or refs["columns"].get(entity_id) or "una columna"
+        verb = {"created": "creó", "deleted": "eliminó"}.get(action, "modificó")
+        message, kind = f"{verb} la columna “{name}”", "create" if action == "created" else "update"
     elif entity == "comments":
-        body = (ch.get("body") or "")[:60]
+        body = (_new(ch, "body") or "")[:60]
         message, kind = f"comentó: “{body}”", "comment"
     elif entity == "sprints" and action == "created":
         message, kind = f"creó el Sprint #{ch.get('number', '')}", "create"
     elif entity == "sprints" and action == "status_changed":
         message, kind = "cambió el estado del Sprint a", "update"
-        highlight = SPRINT_STATUS_ES.get(ch["status"]["new"], ch["status"]["new"])
+        highlight = SPRINT_STATUS_ES.get(_new(ch, "status"), _new(ch, "status"))
     elif entity == "sprints":
         message, kind = "actualizó el Sprint", "update"
     elif entity == "task_labels":
         message, kind = "añadió la etiqueta", "label"
-        highlight = labels.get(UUID(ch["label_id"])) if ch.get("label_id") else None
+        highlight = refs["labels"].get(_uuid(ch.get("label_id")))
+    elif entity == "task_assignees" and action == "deleted":
+        message, kind = f"quitó a {person} de “{title}”", "update"
     elif entity == "task_assignees":
-        message, kind = f"asignó un responsable a “{title}”", "update"
+        message, kind = f"asignó a {person} en “{title}”", "update"
+    elif entity == "checklist_items":
+        message, kind = f"actualizó el checklist de “{title}”", "update"
     elif entity == "backlog_items" and action == "created":
         message, kind = f"creó el PBI {ch.get('code', '')} “{ch.get('title', '')}”", "create"
     elif entity == "backlog_items":
         message, kind = "actualizó un elemento del Product Backlog", "update"
     elif entity == "projects" and action == "created":
         message, kind = f"creó el proyecto “{ch.get('name', '')}”", "create"
+    elif entity == "projects":
+        message, kind = "actualizó los datos del proyecto", "update"
+    elif entity == "project_members" and action == "created":
+        message, kind = f"agregó a {person} al proyecto como", "create"
+        highlight = ROLE_ES.get(ch.get("role"), ch.get("role"))
+    elif entity == "project_members" and action == "deleted":
+        message, kind = f"quitó a {person} del proyecto", "update"
     elif entity == "project_members":
-        message, kind = "agregó un integrante al proyecto", "create"
+        message, kind = "cambió el rol de un integrante a", "update"
+        highlight = ROLE_ES.get(_new(ch, "role"), _new(ch, "role"))
+    elif entity == "invitations" and action == "created":
+        message, kind = f"invitó a {ch.get('email', 'una persona')}", "create"
+    elif entity == "invitations":
+        message, kind = "actualizó una invitación:", "update"
+        highlight = INVITATION_ES.get(_new(ch, "status"), _new(ch, "status"))
     elif entity == "scrum_events":
-        message, kind = f"registró {EVENT_ES.get(ch.get('type', ''), 'un evento Scrum')}", "create"
+        message, kind = f"registró {EVENT_ES.get(_new(ch, 'type') or '', 'un evento Scrum')}", "create"
     elif entity == "retro_actions":
         message, kind = "registró una acción de mejora", "create"
     else:
-        message = f"{action} {entity}"
+        verb = {"created": "creó", "deleted": "eliminó"}.get(action, "modificó")
+        message = f"{verb} un registro ({entity})"
 
     return ActivityItem(id=r["id"], actor_name=r["actor_name"], message=message, highlight=highlight,
                         kind=kind, created_at=r["created_at"])

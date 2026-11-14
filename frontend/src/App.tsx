@@ -11,6 +11,7 @@ import { LoginPage } from '@/pages/auth/LoginPage';
 import { RegisterPage } from '@/pages/auth/RegisterPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
 import { BoardsPage } from '@/pages/BoardsPage';
+import { LogbookPage } from '@/pages/LogbookPage';
 import { MembersPage } from '@/pages/MembersPage';
 import { WorkspacesPage } from '@/pages/WorkspacesPage';
 import { ProtectedRoute } from '@/routes/ProtectedRoute';
@@ -33,7 +34,8 @@ export default function App() {
                 <Route path="/tableros" element={<BoardsPage />} />
                 <Route path="/miembros" element={<MembersPage />} />
                 <Route path="/plantillas" element={<TemplatesPage />} />
-                {NAV_ITEMS.filter((item) => !['/', '/espacios', '/tableros', '/miembros', '/plantillas'].includes(item.to)).map((item) => (
+                <Route path="/bitacora" element={<LogbookPage />} />
+                {NAV_ITEMS.filter((item) => !['/', '/espacios', '/tableros', '/miembros', '/plantillas', '/bitacora'].includes(item.to)).map((item) => (
                   <Route key={item.to} path={item.to} element={<ModulePlaceholder item={item} />} />
                 ))}
               </Route>
