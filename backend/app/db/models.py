@@ -257,3 +257,17 @@ class RetroAction(Base):
     due_date: Mapped[date | None] = mapped_column(Date)
     status: Mapped[str] = mapped_column(ActionStatus, default="pending")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class Label(Base):
+    __tablename__ = "labels"
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id"))
+    name: Mapped[str] = mapped_column(Text)
+    color: Mapped[str] = mapped_column(Text, default="#64748B")
+
+
+class TaskLabel(Base):
+    __tablename__ = "task_labels"
+    task_id: Mapped[UUID] = mapped_column(ForeignKey("tasks.id"), primary_key=True)
+    label_id: Mapped[UUID] = mapped_column(ForeignKey("labels.id"), primary_key=True)

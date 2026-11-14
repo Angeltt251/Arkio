@@ -29,3 +29,7 @@ export async function apiFetch<T>(path: string, token: string | null, init: Requ
   }
   return (response.status === 204 ? undefined : await response.json()) as T;
 }
+
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}

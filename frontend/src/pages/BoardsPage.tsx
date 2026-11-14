@@ -20,6 +20,25 @@ interface Task {
   blockedReason: string | null;
   assigneeIds: string[];
   completed: boolean;
+  labelIds: string[];
+  checklistTotal: number;
+  checklistDone: number;
+  backlogItemId: string | null;
+  backlogItemCode: string | null;
+  sprintNumber: number | null;
+}
+
+interface Label {
+  id: string;
+  name: string;
+  color: string;
+}
+
+interface ChecklistItem {
+  id: string;
+  content: string;
+  isDone: boolean;
+  position: number;
 }
 
 interface Column {
@@ -46,6 +65,7 @@ interface Board {
   canManageColumns: boolean;
   columns: Column[];
   members: Member[];
+  labels: Label[];
 }
 
 interface ProjectOption {
@@ -53,6 +73,8 @@ interface ProjectOption {
   name: string;
   color: string;
 }
+
+const LABEL_COLORS = ['#447794', '#22A06B', '#F08A24', '#E5487D', '#2F80ED', '#8B5CF6', '#64748B'];
 
 const PRIORITY_LABEL: Record<Priority, string> = { low: 'Baja', medium: 'Media', high: 'Alta', critical: 'Crítica' };
 
@@ -132,6 +154,7 @@ export function BoardsPage() {
   }, [token, projectId, loadBoard]);
 
   const membersById = new Map(board?.members.map((m) => [m.id, m]) ?? []);
+  const labelsById = new Map(board?.labels.map((l) => [l.id, l]) ?? []);
 
   // ------------------------------------------------------------ drag & drop
   const onDragOverColumn = (e: DragEvent<HTMLDivElement>, column: Column) => {
@@ -319,13 +342,32 @@ export function BoardsPage() {
                         <div className="task-card__top">
                           <span className={`priority priority--${task.priority}`}>{PRIORITY_LABEL[task.priority]}</span>
                           {task.isBlocked && <span className="task-card__blocked" title={task.blockedReason ?? ''}>Bloqueada</span>}
+                          {task.backlogItemCode && (
+                            <span className="task-card__pbi" title={task.sprintNumber ? `Sprint #${task.sprintNumber}` : undefined}>
+                              {task.backlogItemCode}
+                            </span>
+                          )}
                         </div>
+                        {task.labelIds.length > 0 && (
+                          <div className="task-card__labels">
+                            {task.labelIds.map((id) => {
+                              const label = labelsById.get(id);
+                              return label ? <LabelTag key={id} label={label} /> : null;
+                            })}
+                          </div>
+                        )}
                         <h3 className={task.completed ? 'task-card__title--done' : undefined}>{task.title}</h3>
                         {task.description && <p className="task-card__desc">{task.description}</p>}
-                        {(task.dueDate || task.assigneeIds.length > 0) && (
+                        {(task.dueDate || task.assigneeIds.length > 0 || task.checklistTotal > 0) && (
                           <footer className="task-card__foot">
-                            <span className="muted small">
+                            <span className="muted small task-card__info">
                               {task.dueDate ? dueFmt.format(new Date(`${task.dueDate}T12:00:00`)) : ''}
+                              {task.checklistTotal > 0 && (
+                                <span className={task.checklistDone === task.checklistTotal ? 'task-card__check--done' : undefined}
+                                  title="Checklist">
+                                  <Icon name="check" size={13} /> {task.checklistDone}/{task.checklistTotal}
+                                </span>
+                              )}
                             </span>
                             <div className="avatar-group">
                               {task.assigneeIds.map((id) => {
@@ -409,6 +451,13 @@ export function BoardsPage() {
         <TaskDialog task={editing} board={board} token={token}
           onClose={() => setEditing(null)}
           onSaved={(t) => { replaceTask(t); setEditing(null); }}
+          onLabelCreated={(label) => setBoard((b) => (b ? { ...b, labels: [...b.labels, label].sort((x, y) => x.name.localeCompare(y.name)) } : b))}
+          onChecklistChanged={(id, total, done) => {
+            setBoard((b) => b && {
+              ...b,
+              columns: b.columns.map((c) => ({ ...c, tasks: c.tasks.map((t) => (t.id === id ? { ...t, checklistTotal: total, checklistDone: done } : t)) })),
+            });
+          }}
           onMoved={(id, columnId) =>
             setBoard((b) => (b ? { ...b, columns: moveLocally(b.columns, id, columnId, Number.MAX_SAFE_INTEGER) } : b))}
           onArchived={(id) => { removeTask(id); setEditing(null); }} />
@@ -425,9 +474,26 @@ interface TaskDialogProps {
   onSaved: (task: Task) => void;
   onArchived: (taskId: string) => void;
   onMoved: (taskId: string, columnId: string) => void;
+  onLabelCreated: (label: Label) => void;
+  onChecklistChanged: (taskId: string, total: number, done: number) => void;
 }
 
-function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved }: TaskDialogProps) {
+interface PbiOption {
+  id: string;
+  code: string;
+  title: string;
+  archived: boolean;
+}
+
+function LabelTag({ label }: { label: Label }) {
+  return (
+    <span className="label-tag" style={{ ['--label' as string]: label.color }}>
+      <span className="label-tag__dot" aria-hidden="true" /> {label.name}
+    </span>
+  );
+}
+
+function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved, onLabelCreated, onChecklistChanged }: TaskDialogProps) {
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? '');
   const [priority, setPriority] = useState<Priority>(task.priority);
@@ -436,6 +502,13 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved 
   const [isBlocked, setIsBlocked] = useState(task.isBlocked);
   const [blockedReason, setBlockedReason] = useState(task.blockedReason ?? '');
   const [columnId, setColumnId] = useState(task.columnId);
+  const [labelIds, setLabelIds] = useState<string[]>(task.labelIds);
+  const [newLabel, setNewLabel] = useState('');
+  const [newLabelColor, setNewLabelColor] = useState(LABEL_COLORS[0]);
+  const [backlogItemId, setBacklogItemId] = useState(task.backlogItemId ?? '');
+  const [pbis, setPbis] = useState<PbiOption[]>([]);
+  const [checklist, setChecklist] = useState<ChecklistItem[] | null>(null);
+  const [newItem, setNewItem] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const readOnly = !board.canEdit;
@@ -445,6 +518,74 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved 
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  useEffect(() => {
+    apiFetch<ChecklistItem[]>(`/api/tasks/${task.id}/checklist`, token)
+      .then(setChecklist)
+      .catch(() => setChecklist([]));
+    apiFetch<{ items: PbiOption[] }>(`/api/projects/${board.projectId}/backlog`, token)
+      .then((b) => setPbis(b.items))
+      .catch(() => setPbis([]));
+  }, [task.id, board.projectId, token]);
+
+  const updateChecklist = (items: ChecklistItem[]) => {
+    setChecklist(items);
+    onChecklistChanged(task.id, items.length, items.filter((i) => i.isDone).length);
+  };
+
+  const addItem = async () => {
+    const content = newItem.trim();
+    if (!content || !checklist) return;
+    try {
+      const item = await apiFetch<ChecklistItem>(`/api/tasks/${task.id}/checklist`, token, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      });
+      updateChecklist([...checklist, item]);
+      setNewItem('');
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo agregar el elemento.'));
+    }
+  };
+
+  const toggleItem = async (item: ChecklistItem) => {
+    if (!checklist) return;
+    try {
+      const updated = await apiFetch<ChecklistItem>(`/api/checklist/${item.id}`, token, {
+        method: 'PATCH',
+        body: JSON.stringify({ isDone: !item.isDone }),
+      });
+      updateChecklist(checklist.map((i) => (i.id === updated.id ? updated : i)));
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo actualizar el checklist.'));
+    }
+  };
+
+  const removeItem = async (item: ChecklistItem) => {
+    if (!checklist) return;
+    try {
+      await apiFetch(`/api/checklist/${item.id}`, token, { method: 'DELETE' });
+      updateChecklist(checklist.filter((i) => i.id !== item.id));
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo quitar el elemento.'));
+    }
+  };
+
+  const createLabel = async () => {
+    const name = newLabel.trim();
+    if (!name) return;
+    try {
+      const label = await apiFetch<Label>(`/api/projects/${board.projectId}/labels`, token, {
+        method: 'POST',
+        body: JSON.stringify({ name, color: newLabelColor }),
+      });
+      onLabelCreated(label);
+      setLabelIds((ids) => [...ids, label.id]);
+      setNewLabel('');
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo crear la etiqueta.'));
+    }
+  };
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -468,6 +609,8 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved 
             priority,
             dueDate: dueDate || null,
             assigneeIds: assignees,
+            labelIds,
+            backlogItemId: backlogItemId || null,
             isBlocked,
             blockedReason: isBlocked ? blockedReason.trim() || null : null,
           }),
@@ -554,6 +697,87 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved 
                 );
               })}
             </div>
+          </div>
+
+          <label className="field">
+            <span>PBI asociado</span>
+            <select className="select" value={backlogItemId} onChange={(e) => setBacklogItemId(e.target.value)}>
+              <option value="">Sin PBI</option>
+              {pbis.filter((p) => !p.archived || p.id === backlogItemId).map((p) => (
+                <option key={p.id} value={p.id}>{p.code} · {p.title}</option>
+              ))}
+            </select>
+          </label>
+
+          <div className="field">
+            <span>Etiquetas</span>
+            <div className="chips">
+              {board.labels.map((label) => {
+                const on = labelIds.includes(label.id);
+                return (
+                  <button key={label.id} type="button" className={`chip chip--plain${on ? ' chip--on' : ''}`} aria-pressed={on}
+                    onClick={() => setLabelIds((ids) => (on ? ids.filter((id) => id !== label.id) : [...ids, label.id]))}>
+                    <LabelTag label={label} />
+                  </button>
+                );
+              })}
+            </div>
+            <div className="label-new">
+              <div className="input">
+                <input maxLength={30} placeholder="Nueva etiqueta" value={newLabel} onChange={(e) => setNewLabel(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void createLabel(); } }} />
+              </div>
+              <div className="label-new__colors" role="radiogroup" aria-label="Color de la etiqueta">
+                {LABEL_COLORS.map((c) => (
+                  <button key={c} type="button" role="radio" aria-checked={newLabelColor === c} aria-label={`Color ${c}`}
+                    className={`label-swatch${newLabelColor === c ? ' label-swatch--on' : ''}`} style={{ background: c }}
+                    onClick={() => setNewLabelColor(c)} />
+                ))}
+              </div>
+              <button type="button" className="btn btn--ghost btn--sm" disabled={!newLabel.trim()} onClick={() => void createLabel()}>
+                Crear
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <span className="field__row">
+              Checklist
+              {checklist && checklist.length > 0 && (
+                <span className="muted small">{checklist.filter((i) => i.isDone).length}/{checklist.length}</span>
+              )}
+            </span>
+            {checklist === null ? (
+              <p className="muted small" style={{ margin: 0 }}>Cargando…</p>
+            ) : (
+              <ul className="checklist">
+                {checklist.map((item) => (
+                  <li key={item.id}>
+                    <label className="check">
+                      <input type="checkbox" checked={item.isDone} onChange={() => void toggleItem(item)} />
+                      <span className={item.isDone ? 'task-card__title--done' : undefined}>{item.content}</span>
+                    </label>
+                    {!readOnly && (
+                      <button type="button" className="icon-btn icon-btn--sm" aria-label={`Quitar ${item.content}`}
+                        onClick={() => void removeItem(item)}>
+                        <Icon name="close" size={14} />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {!readOnly && (
+              <div className="label-new">
+                <div className="input">
+                  <input maxLength={300} placeholder="Agregar elemento" value={newItem} onChange={(e) => setNewItem(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addItem(); } }} />
+                </div>
+                <button type="button" className="btn btn--ghost btn--sm" disabled={!newItem.trim()} onClick={() => void addItem()}>
+                  Agregar
+                </button>
+              </div>
+            )}
           </div>
 
           <label className="check">

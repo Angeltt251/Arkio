@@ -11,38 +11,43 @@ from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, UserDB
-from app.db.models import BoardColumn, Profile, Project, ProjectMember, Task, TaskAssignee, WorkspaceMember
+from app.db.models import (
+    BacklogItem,
+    BoardColumn,
+    ChecklistItem,
+    Label,
+    Profile,
+    ProjectMember,
+    Sprint,
+    SprintItem,
+    Task,
+    TaskAssignee,
+    TaskLabel,
+)
 from app.schemas.board import (
     BoardMember,
     BoardOut,
+    ChecklistItemCreate,
+    ChecklistItemOut,
+    ChecklistItemUpdate,
     ColumnCreate,
     ColumnMove,
     ColumnOut,
     ColumnUpdate,
+    LabelCreate,
+    LabelOut,
     TaskCreate,
     TaskMove,
     TaskOut,
     TaskUpdate,
 )
-from app.services.permissions import ADMIN_ROLES, project_access, require_project_manager
+from app.services.permissions import can_edit, can_manage, project_access, require_project_manager
 
 router = APIRouter(tags=["tablero"])
 
 
-def _can_edit(db: Session, project: Project, user_id: UUID) -> bool:
-    ws_member = db.get(WorkspaceMember, (project.workspace_id, user_id))
-    if ws_member and ws_member.status == "active" and ws_member.role in ADMIN_ROLES:
-        return True
-    member = db.get(ProjectMember, (project.id, user_id))
-    return member is not None and member.role != "observer"
-
-
-def _can_manage_columns(db: Session, project: Project, user_id: UUID) -> bool:
-    try:
-        require_project_manager(db, project.id, user_id)
-        return True
-    except HTTPException:
-        return False
+def _labels(db: Session, project_id: UUID) -> list[Label]:
+    return list(db.scalars(select(Label).where(Label.project_id == project_id).order_by(Label.name)))
 
 
 def _columns(db: Session, project_id: UUID) -> list[BoardColumn]:
@@ -51,20 +56,61 @@ def _columns(db: Session, project_id: UUID) -> list[BoardColumn]:
     ))
 
 
-def _assignees(db: Session, task_ids: list[UUID]) -> dict[UUID, list[UUID]]:
-    result: dict[UUID, list[UUID]] = {tid: [] for tid in task_ids}
-    if task_ids:
-        for row in db.execute(select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids))):
-            result[row.task_id].append(row.user_id)
-    return result
+def _task_outs(db: Session, tasks: list[Task]) -> list[TaskOut]:
+    """Arma las tarjetas con responsables, etiquetas, progreso del checklist, PBI y Sprint (en pocas consultas)."""
+    ids = [t.id for t in tasks]
+    assignees: dict[UUID, list[UUID]] = {tid: [] for tid in ids}
+    labels: dict[UUID, list[UUID]] = {tid: [] for tid in ids}
+    checklist: dict[UUID, tuple[int, int]] = {}
+    if ids:
+        for row in db.execute(select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(ids))):
+            assignees[row.task_id].append(row.user_id)
+        for row in db.execute(select(TaskLabel.task_id, TaskLabel.label_id).where(TaskLabel.task_id.in_(ids))):
+            labels[row.task_id].append(row.label_id)
+        for row in db.execute(
+            select(ChecklistItem.task_id, func.count(), func.count().filter(ChecklistItem.is_done))
+            .where(ChecklistItem.task_id.in_(ids)).group_by(ChecklistItem.task_id)
+        ):
+            checklist[row[0]] = (row[1], row[2])
+    pbi_ids = {t.backlog_item_id for t in tasks if t.backlog_item_id}
+    codes = dict(db.execute(select(BacklogItem.id, BacklogItem.code).where(BacklogItem.id.in_(pbi_ids))).all()) if pbi_ids else {}
+    sprint_ids = {t.sprint_id for t in tasks if t.sprint_id}
+    numbers = dict(db.execute(select(Sprint.id, Sprint.number).where(Sprint.id.in_(sprint_ids))).all()) if sprint_ids else {}
+    return [
+        TaskOut(
+            id=t.id, column_id=t.column_id, title=t.title, description=t.description,
+            priority=t.priority, position=t.position, due_date=t.due_date, is_blocked=t.is_blocked,
+            blocked_reason=t.blocked_reason, assignee_ids=assignees[t.id], completed=t.completed_at is not None,
+            label_ids=labels[t.id], checklist_total=checklist.get(t.id, (0, 0))[0],
+            checklist_done=checklist.get(t.id, (0, 0))[1], backlog_item_id=t.backlog_item_id,
+            backlog_item_code=codes.get(t.backlog_item_id), sprint_number=numbers.get(t.sprint_id),
+        )
+        for t in tasks
+    ]
 
 
-def _task_out(task: Task, assignee_ids: list[UUID]) -> TaskOut:
-    return TaskOut(
-        id=task.id, column_id=task.column_id, title=task.title, description=task.description,
-        priority=task.priority, position=task.position, due_date=task.due_date, is_blocked=task.is_blocked,
-        blocked_reason=task.blocked_reason, assignee_ids=assignee_ids, completed=task.completed_at is not None,
-    )
+def _task_out(db: Session, task: Task) -> TaskOut:
+    return _task_outs(db, [task])[0]
+
+
+def _set_labels(db: Session, task: Task, label_ids: list[UUID]) -> None:
+    wanted = set(label_ids)
+    allowed = set(db.scalars(select(Label.id).where(Label.project_id == task.project_id)))
+    if not wanted <= allowed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "La etiqueta no pertenece a este proyecto")
+    current = set(db.scalars(select(TaskLabel.label_id).where(TaskLabel.task_id == task.id)))
+    for lid in current - wanted:
+        db.delete(db.get(TaskLabel, (task.id, lid)))
+    for lid in wanted - current:
+        db.add(TaskLabel(task_id=task.id, label_id=lid))
+
+
+def _check_pbi(db: Session, project_id: UUID, backlog_item_id: UUID | None) -> None:
+    if backlog_item_id is None:
+        return
+    pbi = db.get(BacklogItem, backlog_item_id)
+    if pbi is None or pbi.project_id != project_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El PBI no pertenece a este proyecto")
 
 
 def _project_member_ids(db: Session, project_id: UUID) -> set[UUID]:
@@ -110,10 +156,9 @@ def get_board(project_id: UUID, user: CurrentUser, db: UserDB) -> BoardOut:
     tasks = list(db.scalars(
         select(Task).where(Task.project_id == project_id, Task.archived_at.is_(None)).order_by(Task.position, Task.created_at)
     ))
-    assignees = _assignees(db, [t.id for t in tasks])
     by_column: dict[UUID, list[TaskOut]] = {c.id: [] for c in columns}
-    for task in tasks:
-        by_column.setdefault(task.column_id, []).append(_task_out(task, assignees[task.id]))
+    for out in _task_outs(db, tasks):
+        by_column.setdefault(out.column_id, []).append(out)
 
     members = db.execute(
         select(Profile).join(ProjectMember, ProjectMember.user_id == Profile.id)
@@ -121,14 +166,15 @@ def get_board(project_id: UUID, user: CurrentUser, db: UserDB) -> BoardOut:
     ).scalars()
     return BoardOut(
         project_id=project.id, project_name=project.name, project_key=project.key, project_color=project.color,
-        can_edit=_can_edit(db, project, user.id),
-        can_manage_columns=_can_manage_columns(db, project, user.id),
+        can_edit=can_edit(db, project, user.id),
+        can_manage_columns=can_manage(db, project, user.id),
         columns=[
             ColumnOut(id=c.id, name=c.name, position=c.position, wip_limit=c.wip_limit, is_done=c.is_done,
                       tasks=by_column[c.id])
             for c in columns
         ],
         members=[BoardMember(id=m.id, name=m.full_name or m.email, avatar_url=m.avatar_url) for m in members],
+        labels=[LabelOut(id=lb.id, name=lb.name, color=lb.color) for lb in _labels(db, project_id)],
     )
 
 
@@ -142,24 +188,35 @@ def create_task(project_id: UUID, payload: TaskCreate, user: CurrentUser, db: Us
     if column is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "La columna no pertenece a este proyecto")
     _check_wip(db, column)
+    _check_pbi(db, project_id, payload.backlog_item_id)
 
     last = db.scalar(select(func.max(Task.position)).where(Task.column_id == column.id, Task.archived_at.is_(None)))
     task = Task(
         project_id=project_id, column_id=column.id, title=payload.title.strip(), description=payload.description,
         priority=payload.priority, due_date=payload.due_date, position=(last or 0) + 1, created_by=user.id,
+        backlog_item_id=payload.backlog_item_id,
     )
+    if payload.backlog_item_id:
+        # La tarea nace dentro del Sprint donde está su PBI (si hay uno abierto)
+        task.sprint_id = db.scalar(
+            select(Sprint.id).join(SprintItem, SprintItem.sprint_id == Sprint.id)
+            .where(SprintItem.backlog_item_id == payload.backlog_item_id, Sprint.status.in_(("planned", "active")))
+        )
     db.add(task)
     db.flush()
     _set_assignees(db, task, payload.assignee_ids)
+    _set_labels(db, task, payload.label_ids)
     db.commit()
     db.refresh(task)
-    return _task_out(task, payload.assignee_ids)
+    return _task_out(db, task)
 
 
 @router.patch("/tasks/{task_id}", response_model=TaskOut)
 def update_task(task_id: UUID, payload: TaskUpdate, user: CurrentUser, db: UserDB) -> TaskOut:
     task = _editable_task(db, task_id, user.id)
-    changes = payload.model_dump(exclude_unset=True, exclude={"assignee_ids"})
+    changes = payload.model_dump(exclude_unset=True, exclude={"assignee_ids", "label_ids"})
+    if "backlog_item_id" in changes:
+        _check_pbi(db, task.project_id, changes["backlog_item_id"])
     if "title" in changes and changes["title"] is not None:
         changes["title"] = changes["title"].strip()
     if changes.get("is_blocked") is False:
@@ -168,9 +225,11 @@ def update_task(task_id: UUID, payload: TaskUpdate, user: CurrentUser, db: UserD
         setattr(task, field, value)
     if payload.assignee_ids is not None:
         _set_assignees(db, task, payload.assignee_ids)
+    if payload.label_ids is not None:
+        _set_labels(db, task, payload.label_ids)
     db.commit()
     db.refresh(task)
-    return _task_out(task, _assignees(db, [task.id])[task.id])
+    return _task_out(db, task)
 
 
 @router.post("/tasks/{task_id}/move", response_model=TaskOut)
@@ -202,7 +261,7 @@ def move_task(task_id: UUID, payload: TaskMove, user: CurrentUser, db: UserDB) -
     task.position = position
     db.commit()
     db.refresh(task)
-    return _task_out(task, _assignees(db, [task.id])[task.id])
+    return _task_out(db, task)
 
 
 @router.delete("/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -223,10 +282,9 @@ def _column_out(db: Session, column: BoardColumn) -> ColumnOut:
     tasks = list(db.scalars(
         select(Task).where(Task.column_id == column.id, Task.archived_at.is_(None)).order_by(Task.position)
     ))
-    assignees = _assignees(db, [t.id for t in tasks])
     return ColumnOut(
         id=column.id, name=column.name, position=column.position, wip_limit=column.wip_limit,
-        is_done=column.is_done, tasks=[_task_out(t, assignees[t.id]) for t in tasks],
+        is_done=column.is_done, tasks=_task_outs(db, tasks),
     )
 
 
@@ -337,4 +395,83 @@ def delete_column(
     db.delete(column)
     db.flush()
     _renumber(db, [c for c in columns if c.id != column.id])
+    db.commit()
+
+
+# ------------------------------------------------------------------ etiquetas
+@router.post("/projects/{project_id}/labels", response_model=LabelOut, status_code=status.HTTP_201_CREATED)
+def create_label(project_id: UUID, payload: LabelCreate, user: CurrentUser, db: UserDB) -> Label:
+    project_access(db, project_id, user.id, write=True)
+    name = payload.name.strip()
+    if any(lb.name.lower() == name.lower() for lb in _labels(db, project_id)):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Ya existe la etiqueta «{name}»")
+    label = Label(project_id=project_id, name=name, color=payload.color)
+    db.add(label)
+    db.commit()
+    db.refresh(label)
+    return label
+
+
+@router.delete("/labels/{label_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_label(label_id: UUID, user: CurrentUser, db: UserDB) -> None:
+    """Elimina la etiqueta de todas las tarjetas (Product Owner, Scrum Master o administrador)."""
+    label = db.get(Label, label_id)
+    if label is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Etiqueta no encontrada")
+    require_project_manager(db, label.project_id, user.id)
+    db.delete(label)
+    db.commit()
+
+
+# ------------------------------------------------------------------ checklist
+def _checklist(db: Session, task_id: UUID) -> list[ChecklistItem]:
+    return list(db.scalars(
+        select(ChecklistItem).where(ChecklistItem.task_id == task_id)
+        .order_by(ChecklistItem.position, ChecklistItem.created_at)
+    ))
+
+
+def _editable_item(db: Session, item_id: UUID, user_id: UUID) -> ChecklistItem:
+    item = db.get(ChecklistItem, item_id)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Elemento no encontrado")
+    _editable_task(db, item.task_id, user_id)
+    return item
+
+
+@router.get("/tasks/{task_id}/checklist", response_model=list[ChecklistItemOut])
+def get_checklist(task_id: UUID, user: CurrentUser, db: UserDB) -> list[ChecklistItem]:
+    task = db.get(Task, task_id)
+    if task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tarea no encontrada")
+    project_access(db, task.project_id, user.id)
+    return _checklist(db, task_id)
+
+
+@router.post("/tasks/{task_id}/checklist", response_model=ChecklistItemOut, status_code=status.HTTP_201_CREATED)
+def add_checklist_item(task_id: UUID, payload: ChecklistItemCreate, user: CurrentUser, db: UserDB) -> ChecklistItem:
+    _editable_task(db, task_id, user.id)
+    last = db.scalar(select(func.max(ChecklistItem.position)).where(ChecklistItem.task_id == task_id))
+    item = ChecklistItem(task_id=task_id, content=payload.content.strip(), position=(last or 0) + 1)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.patch("/checklist/{item_id}", response_model=ChecklistItemOut)
+def update_checklist_item(item_id: UUID, payload: ChecklistItemUpdate, user: CurrentUser, db: UserDB) -> ChecklistItem:
+    item = _editable_item(db, item_id, user.id)
+    if payload.content is not None:
+        item.content = payload.content.strip()
+    if payload.is_done is not None:
+        item.is_done = payload.is_done
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/checklist/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_checklist_item(item_id: UUID, user: CurrentUser, db: UserDB) -> None:
+    db.delete(_editable_item(db, item_id, user.id))
     db.commit()

@@ -47,6 +47,8 @@ FIELD_ES = {
     "workspace_role": "Rol en el espacio", "project_role": "Rol en el proyecto", "expires_at": "Vence",
     "owner_id": "Responsable", "number": "Número", "type": "Tipo", "notes": "Notas", "agreements": "Acuerdos",
     "code": "Código", "acceptance_criteria": "Criterios de aceptación", "label_id": "Etiqueta",
+    "story_as_a": "Como", "story_i_want": "Quiero", "story_so_that": "Para", "held_at": "Fecha del evento",
+    "duration_minutes": "Duración (min)",
 }
 # Campos técnicos que no aportan al lector de la bitácora
 HIDDEN = {
@@ -61,6 +63,11 @@ VALUE_ES = {
     "planning": "Planificación", "active": "Activo", "paused": "En pausa", "closed": "Cerrado",
     "planned": "Planificado", "cancelled": "Cancelado", "pending": "Pendiente", "accepted": "Aceptada",
     "declined": "Rechazada", "revoked": "Revocado", "expired": "Vencida",
+    "new": "Nuevo", "refined": "Refinado", "ready": "Listo", "in_sprint": "En Sprint", "done": "Terminado",
+    "discarded": "Descartado", "in_progress": "En progreso", "dropped": "Descartada",
+    "story": "Historia de usuario", "bug": "Defecto", "task": "Tarea técnica", "spike": "Investigación",
+    "improvement": "Mejora", "sprint_planning": "Sprint Planning", "daily_scrum": "Daily Scrum",
+    "sprint_review": "Sprint Review", "sprint_retrospective": "Retrospectiva",
 }
 
 

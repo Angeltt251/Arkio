@@ -36,6 +36,13 @@ const PATHS = {
       <path d="M9 8h7M9 12h7M9 16h4M3 7h4M3 12h4M3 17h4" />
     </>
   ),
+  list: <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01" />,
+  calendar: (
+    <>
+      <rect x="3" y="4.5" width="18" height="16.5" rx="2" />
+      <path d="M3 9.5h18M8 3v3M16 3v3M7.5 13.5h3M7.5 17h3M13.5 13.5h3" />
+    </>
+  ),
   reports: <path d="M4 20V13M10 20V8M16 20v-9M21 20H3M20 4l-5 5-3-3-5 5" />,
   settings: (
     <>

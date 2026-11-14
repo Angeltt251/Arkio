@@ -63,6 +63,10 @@ Arkio/
 - **Seguridad**: RLS por espacio/proyecto, rol observador (profesor) de solo lectura, permisos validados también en FastAPI.
 - **API**: perfil, dashboard, espacios, proyectos (con tablero por defecto: Por hacer → En progreso → En revisión → Testing → Terminado), miembros, invitaciones por correo con token y vencimiento, consulta de bitácora con filtros.
 - **WebSocket** `/ws`: los cambios en la base de datos llegan en vivo al dashboard.
+- **Product Backlog**: Product Goal, PBIs con código (SAL-12), historias "Como / quiero / para", criterios de aceptación, prioridad, estimación en puntos y estado. Refinamiento: reordenar arrastrando, dividir un PBI en partes, archivar y restaurar.
+- **Sprint Planning**: duración de 1 a 4 semanas (o fechas libres, máx. un mes), selección de PBIs con avisos de capacidad (velocidad de los últimos Sprints), PBIs sin estimar/refinar y dependencias; Sprint Goal, plan y participantes. Al confirmar crea el Sprint numerado, una tarjeta por PBI en el tablero y el acta de la Planning. Iniciar, cerrar o cancelar con motivo (los PBIs sin terminar vuelven al backlog).
+- **Eventos Scrum**: actas de Planning, Daily (15 min), Review y Retrospective con asistentes, acuerdos y acciones de mejora con responsable, fecha y estado.
+- **Tablero**: además de columnas y WIP, las tarjetas tienen etiquetas (con texto, no solo color), checklist con progreso y PBI/Sprint asociado.
 
 Las demás secciones del menú muestran una página que indica en qué iteración se construyen.
 

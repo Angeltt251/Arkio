@@ -10,11 +10,16 @@ import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage';
 import { LoginPage } from '@/pages/auth/LoginPage';
 import { RegisterPage } from '@/pages/auth/RegisterPage';
 import { TemplatesPage } from '@/pages/TemplatesPage';
+import { BacklogPage } from '@/pages/BacklogPage';
 import { BoardsPage } from '@/pages/BoardsPage';
+import { EventsPage } from '@/pages/EventsPage';
+import { SprintsPage } from '@/pages/SprintsPage';
 import { LogbookPage } from '@/pages/LogbookPage';
 import { MembersPage } from '@/pages/MembersPage';
 import { WorkspacesPage } from '@/pages/WorkspacesPage';
 import { ProtectedRoute } from '@/routes/ProtectedRoute';
+
+const BUILT_PAGES = ['/', '/espacios', '/tableros', '/miembros', '/plantillas', '/bitacora', '/backlog', '/sprints', '/eventos'];
 
 export default function App() {
   return (
@@ -35,7 +40,10 @@ export default function App() {
                 <Route path="/miembros" element={<MembersPage />} />
                 <Route path="/plantillas" element={<TemplatesPage />} />
                 <Route path="/bitacora" element={<LogbookPage />} />
-                {NAV_ITEMS.filter((item) => !['/', '/espacios', '/tableros', '/miembros', '/plantillas', '/bitacora'].includes(item.to)).map((item) => (
+                <Route path="/backlog" element={<BacklogPage />} />
+                <Route path="/sprints" element={<SprintsPage />} />
+                <Route path="/eventos" element={<EventsPage />} />
+                {NAV_ITEMS.filter((item) => !BUILT_PAGES.includes(item.to)).map((item) => (
                   <Route key={item.to} path={item.to} element={<ModulePlaceholder item={item} />} />
                 ))}
               </Route>

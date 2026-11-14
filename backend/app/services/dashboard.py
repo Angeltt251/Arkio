@@ -33,6 +33,9 @@ EVENT_ES = {
     "sprint_review": "la Sprint Review",
     "sprint_retrospective": "la Retrospectiva",
 }
+PBI_STATUS_ES = {"new": "Nuevo", "refined": "Refinado", "ready": "Listo", "in_sprint": "En Sprint",
+                 "done": "Terminado", "discarded": "Descartado", "pending": "Pendiente",
+                 "in_progress": "En progreso", "dropped": "Descartada"}
 RELEVANT_ENTITIES = (
     "tasks", "comments", "sprints", "task_labels", "task_assignees", "backlog_items",
     "projects", "project_members", "scrum_events", "retro_actions",
@@ -297,6 +300,9 @@ def _describe(r: dict[str, Any], refs: dict[str, dict[UUID, str]]) -> ActivityIt
         highlight = SPRINT_STATUS_ES.get(_new(ch, "status"), _new(ch, "status"))
     elif entity == "sprints":
         message, kind = "actualizó el Sprint", "update"
+    elif entity == "task_labels" and action == "deleted":
+        message, kind = "quitó la etiqueta", "label"
+        highlight = refs["labels"].get(_uuid(ch.get("label_id")))
     elif entity == "task_labels":
         message, kind = "añadió la etiqueta", "label"
         highlight = refs["labels"].get(_uuid(ch.get("label_id")))
@@ -308,8 +314,17 @@ def _describe(r: dict[str, Any], refs: dict[str, dict[UUID, str]]) -> ActivityIt
         message, kind = f"actualizó el checklist de “{title}”", "update"
     elif entity == "backlog_items" and action == "created":
         message, kind = f"creó el PBI {ch.get('code', '')} “{ch.get('title', '')}”", "create"
+    elif entity == "backlog_items" and action in ("archived", "restored"):
+        verb = "archivó" if action == "archived" else "restauró"
+        message, kind = f"{verb} un elemento del Product Backlog", "update"
+    elif entity == "backlog_items" and action == "status_changed":
+        message, kind = "cambió el estado de un PBI a", "update"
+        highlight = PBI_STATUS_ES.get(_new(ch, "status"), _new(ch, "status"))
     elif entity == "backlog_items":
         message, kind = "actualizó un elemento del Product Backlog", "update"
+    elif entity == "sprint_items":
+        message, kind = "seleccionó un PBI para el", "create"
+        highlight = refs["sprints"].get(_uuid(ch.get("sprint_id")))
     elif entity == "projects" and action == "created":
         message, kind = f"creó el proyecto “{ch.get('name', '')}”", "create"
     elif entity == "projects":
@@ -327,6 +342,11 @@ def _describe(r: dict[str, Any], refs: dict[str, dict[UUID, str]]) -> ActivityIt
     elif entity == "invitations":
         message, kind = "actualizó una invitación:", "update"
         highlight = INVITATION_ES.get(_new(ch, "status"), _new(ch, "status"))
+    elif entity == "scrum_events" and action != "created":
+        message, kind = "actualizó el acta de un evento Scrum", "update"
+    elif entity == "retro_actions" and action == "status_changed":
+        message, kind = "cambió el estado de una acción de mejora a", "update"
+        highlight = PBI_STATUS_ES.get(_new(ch, "status"), _new(ch, "status"))
     elif entity == "scrum_events":
         message, kind = f"registró {EVENT_ES.get(_new(ch, 'type') or '', 'un evento Scrum')}", "create"
     elif entity == "retro_actions":

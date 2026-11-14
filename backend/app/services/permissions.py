@@ -58,6 +58,24 @@ def require_project_manager(db: Session, project_id: UUID, user_id: UUID) -> Pro
     return project
 
 
+def can_edit(db: Session, project: Project, user_id: UUID) -> bool:
+    """Puede editar: admins del espacio o miembros del proyecto que no son observadores."""
+    ws_member = db.get(WorkspaceMember, (project.workspace_id, user_id))
+    if ws_member and ws_member.status == "active" and ws_member.role in ADMIN_ROLES:
+        return True
+    member = db.get(ProjectMember, (project.id, user_id))
+    return member is not None and member.role != "observer"
+
+
+def can_manage(db: Session, project: Project, user_id: UUID) -> bool:
+    """Product Owner, Scrum Master o administrador del espacio."""
+    try:
+        require_project_manager(db, project.id, user_id)
+        return True
+    except HTTPException:
+        return False
+
+
 def accessible_project_ids(db: Session, user_id: UUID) -> list[UUID]:
     direct = (
         select(ProjectMember.project_id)

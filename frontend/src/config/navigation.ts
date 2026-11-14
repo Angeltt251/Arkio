@@ -11,6 +11,8 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Inicio', icon: 'home' },
+  { to: '/backlog', label: 'Product Backlog', icon: 'list' },
+  { to: '/sprints', label: 'Sprints', icon: 'rocket' },
   {
     to: '/tableros',
     label: 'Tableros',
@@ -18,6 +20,7 @@ export const NAV_ITEMS: NavItem[] = [
     iteration: 'Iteración 4 · Tablero',
     description: 'Columnas configurables, tarjetas con responsables, etiquetas, checklist, límites WIP y bloqueos.',
   },
+  { to: '/eventos', label: 'Eventos Scrum', icon: 'calendar' },
   {
     to: '/plantillas',
     label: 'Plantillas',
