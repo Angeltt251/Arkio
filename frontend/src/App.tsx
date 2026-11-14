@@ -13,13 +13,14 @@ import { TemplatesPage } from '@/pages/TemplatesPage';
 import { BacklogPage } from '@/pages/BacklogPage';
 import { BoardsPage } from '@/pages/BoardsPage';
 import { EventsPage } from '@/pages/EventsPage';
+import { ReportsPage } from '@/pages/ReportsPage';
 import { SprintsPage } from '@/pages/SprintsPage';
 import { LogbookPage } from '@/pages/LogbookPage';
 import { MembersPage } from '@/pages/MembersPage';
 import { WorkspacesPage } from '@/pages/WorkspacesPage';
 import { ProtectedRoute } from '@/routes/ProtectedRoute';
 
-const BUILT_PAGES = ['/', '/espacios', '/tableros', '/miembros', '/plantillas', '/bitacora', '/backlog', '/sprints', '/eventos'];
+const BUILT_PAGES = ['/', '/espacios', '/tableros', '/miembros', '/plantillas', '/bitacora', '/backlog', '/sprints', '/eventos', '/reportes'];
 
 export default function App() {
   return (
@@ -43,6 +44,7 @@ export default function App() {
                 <Route path="/backlog" element={<BacklogPage />} />
                 <Route path="/sprints" element={<SprintsPage />} />
                 <Route path="/eventos" element={<EventsPage />} />
+                <Route path="/reportes" element={<ReportsPage />} />
                 {NAV_ITEMS.filter((item) => !BUILT_PAGES.includes(item.to)).map((item) => (
                   <Route key={item.to} path={item.to} element={<ModulePlaceholder item={item} />} />
                 ))}

@@ -12,7 +12,7 @@ function niceMax(value: number): number {
   return Math.ceil(value / step) * step;
 }
 
-export function BurndownChart({ data }: { data: Burndown | null }) {
+export function BurndownChart({ data, picker = true }: { data: Burndown | null; picker?: boolean }) {
   const chart = useMemo(() => {
     if (!data || data.points.length === 0) return null;
     const pts = data.points;
@@ -44,7 +44,7 @@ export function BurndownChart({ data }: { data: Burndown | null }) {
         <h2>
           <Icon name="chart" size={22} className="card__icon" /> Burndown Chart
         </h2>
-        {data && (
+        {data && picker && (
           <select className="select" aria-label="Sprint del gráfico" defaultValue={data.sprintId}>
             <option value={data.sprintId}>{data.sprintLabel}</option>
           </select>

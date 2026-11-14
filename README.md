@@ -67,6 +67,7 @@ Arkio/
 - **Sprint Planning**: duración de 1 a 4 semanas (o fechas libres, máx. un mes), selección de PBIs con avisos de capacidad (velocidad de los últimos Sprints), PBIs sin estimar/refinar y dependencias; Sprint Goal, plan y participantes. Al confirmar crea el Sprint numerado, una tarjeta por PBI en el tablero y el acta de la Planning. Iniciar, cerrar o cancelar con motivo (los PBIs sin terminar vuelven al backlog).
 - **Eventos Scrum**: actas de Planning, Daily (15 min), Review y Retrospective con asistentes, acuerdos y acciones de mejora con responsable, fecha y estado.
 - **Tablero**: además de columnas y WIP, las tarjetas tienen etiquetas (con texto, no solo color), checklist con progreso y PBI/Sprint asociado.
+- **Reportes**: vista previa de cada Sprint (cumplimiento del Sprint Goal, avance, burndown, entregado y pendiente) y PDF descargable generado en el backend con `reportlab`, en dos versiones: *para el cliente* (avance, entregables, Sprint Review, próximos pasos y equipo) y *uso interno* (además tareas con responsables, impedimentos de las Daily, Retrospectiva, acciones de mejora y contribuciones, no como ranking). Admite un nombre de cliente y un mensaje inicial. Informe PDF del proyecto (velocidad, comprometido vs. terminado por Sprint, historial y estado del backlog) y CSV del Product Backlog, Sprints, tareas y Sprint Backlog de cada Sprint, acciones de mejora y bitácora.
 
 Las demás secciones del menú muestran una página que indica en qué iteración se construyen.
 

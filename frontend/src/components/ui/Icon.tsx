@@ -44,6 +44,7 @@ const PATHS = {
     </>
   ),
   reports: <path d="M4 20V13M10 20V8M16 20v-9M21 20H3M20 4l-5 5-3-3-5 5" />,
+  download: <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />,
   settings: (
     <>
       <path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1" />
