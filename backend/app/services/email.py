@@ -140,3 +140,20 @@ def invitation_email(*, inviter: str, workspace: str, project: str | None, link:
   <p style="color:#6b7280;font-size:13px">El enlace vence en {hours} horas. Si no esperabas este correo, ignóralo.</p>
 </div>"""
     return subject, html, text
+
+
+def notification_email(*, title: str, body: str | None, link: str) -> tuple[str, str, str]:
+    text = f"{title}\n\n{body or ''}\n\nÁbrelo en Arkio: {link}\n\nPuedes cambiar qué correos recibes en Configuración → Notificaciones.\n"
+    html = f"""
+<div style="font-family:Inter,Arial,sans-serif;max-width:520px;margin:auto;padding:32px;color:#061222">
+  <h2 style="color:#2d5b75;margin:0 0 16px">Arkio</h2>
+  <p style="font-size:16px"><strong>{escape(title)}</strong></p>
+  {f'<p>{escape(body)}</p>' if body else ''}
+  <p style="margin:28px 0">
+    <a href="{escape(link)}" style="background:#2d5b75;color:#fff;padding:12px 22px;border-radius:10px;text-decoration:none;font-weight:600">
+      Abrir en Arkio
+    </a>
+  </p>
+  <p style="color:#6b7280;font-size:13px">Puedes cambiar qué correos recibes en Configuración → Notificaciones.</p>
+</div>"""
+    return f"Arkio: {title}", html, text

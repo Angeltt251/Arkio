@@ -21,10 +21,21 @@ from app.schemas.workspace import (
     WorkspaceUpdate,
 )
 from app.services.email import invitation_email, send_email
-from app.services.permissions import project_outs, require_workspace_admin, workspace_membership
+from app.services.permissions import (
+    ADMIN_ROLES,
+    project_outs,
+    require_workspace_admin,
+    workspace_membership,
+    workspace_settings,
+)
 from app.services.templates import TEMPLATES_BY_ID, apply_template
 
 router = APIRouter(prefix="/workspaces", tags=["espacios de trabajo"])
+
+
+def _workspace_out(workspace: Workspace, role: str) -> WorkspaceOut:
+    return WorkspaceOut(id=workspace.id, name=workspace.name, role=role, created_at=workspace.created_at,
+                        owner_id=workspace.owner_id, settings=workspace_settings(workspace))
 
 
 @router.get("", response_model=list[WorkspaceOut])
@@ -35,7 +46,7 @@ def list_workspaces(user: CurrentUser, db: UserDB) -> list[WorkspaceOut]:
         .where(WorkspaceMember.user_id == user.id, WorkspaceMember.status == "active")
         .order_by(Workspace.created_at)
     )
-    return [WorkspaceOut(id=ws.id, name=ws.name, role=role, created_at=ws.created_at) for ws, role in rows]
+    return [_workspace_out(ws, role) for ws, role in rows]
 
 
 @router.post("", response_model=WorkspaceOut, status_code=status.HTTP_201_CREATED)
@@ -44,16 +55,22 @@ def create_workspace(payload: WorkspaceCreate, user: CurrentUser, db: UserDB) ->
     db.add(workspace)
     db.commit()  # el trigger `add_workspace_owner` deja al creador como propietario
     db.refresh(workspace)
-    return WorkspaceOut(id=workspace.id, name=workspace.name, role="owner", created_at=workspace.created_at)
+    return _workspace_out(workspace, "owner")
 
 
 @router.patch("/{workspace_id}", response_model=WorkspaceOut)
-def rename_workspace(workspace_id: UUID, payload: WorkspaceUpdate, user: CurrentUser, db: UserDB) -> WorkspaceOut:
+def update_workspace(workspace_id: UUID, payload: WorkspaceUpdate, user: CurrentUser, db: UserDB) -> WorkspaceOut:
+    """Renombra el espacio o cambia su configuración (solo propietario y administradores)."""
     member = require_workspace_admin(db, workspace_id, user.id)
     workspace = db.get(Workspace, workspace_id)
-    workspace.name = payload.name.strip()
+    if payload.name is not None:
+        workspace.name = payload.name.strip()
+    if payload.settings is not None:
+        if payload.settings.default_template not in TEMPLATES_BY_ID:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Esa plantilla de tablero no existe")
+        workspace.settings = {**(workspace.settings or {}), **payload.settings.model_dump()}
     db.commit()
-    return WorkspaceOut(id=workspace.id, name=workspace.name, role=member.role, created_at=workspace.created_at)
+    return _workspace_out(workspace, member.role)
 
 
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -94,7 +111,10 @@ def list_projects(workspace_id: UUID, user: CurrentUser, db: UserDB) -> list[Pro
 
 @router.post("/{workspace_id}/projects", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(workspace_id: UUID, payload: ProjectCreate, user: CurrentUser, db: UserDB) -> ProjectOut:
-    workspace_membership(db, workspace_id, user.id)
+    member = workspace_membership(db, workspace_id, user.id)
+    if member.role not in ADMIN_ROLES and not workspace_settings(db.get(Workspace, workspace_id)).members_can_create_projects:
+        raise HTTPException(status.HTTP_403_FORBIDDEN,
+                            "En este espacio solo el propietario y los administradores pueden crear proyectos")
     if payload.template not in TEMPLATES_BY_ID:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"La plantilla «{payload.template}» no existe")
     exists = db.scalar(select(Project.id).where(Project.workspace_id == workspace_id, Project.key == payload.key))

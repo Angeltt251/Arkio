@@ -1,15 +1,16 @@
 import { useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { Avatar } from '@/components/ui/Avatar';
 import { Icon } from '@/components/ui/Icon';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import { NotificationsMenu } from './NotificationsMenu';
 
 interface TopbarProps {
   onMenu: () => void;
-  notifications: number;
 }
 
-export function Topbar({ onMenu, notifications }: TopbarProps) {
+export function Topbar({ onMenu }: TopbarProps) {
   const { user } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -51,12 +52,13 @@ export function Topbar({ onMenu, notifications }: TopbarProps) {
           </span>
         </button>
 
-        <button className="icon-btn bell" aria-label={`Notificaciones (${notifications} sin leer)`}>
-          <Icon name="bell" size={21} />
-          {notifications > 0 && <span className="bell__badge">{notifications > 9 ? '9+' : notifications}</span>}
-        </button>
+        <NotificationsMenu />
 
-        {user && <Avatar name={user.fullName} src={user.avatarUrl} size={44} className="topbar__avatar" />}
+        {user && (
+          <Link to="/configuracion" aria-label="Mi perfil y configuración" title="Mi perfil y configuración">
+            <Avatar name={user.fullName} src={user.avatarUrl} size={44} className="topbar__avatar" />
+          </Link>
+        )}
       </div>
     </header>
   );

@@ -38,6 +38,7 @@ class Profile(Base):
     full_name: Mapped[str] = mapped_column(Text, default="")
     avatar_url: Mapped[str | None] = mapped_column(Text)
     theme: Mapped[str] = mapped_column(Text, default="system")
+    preferences: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
 
@@ -199,7 +200,12 @@ class Notification(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     user_id: Mapped[UUID] = mapped_column(ForeignKey("profiles.id"))
     activity_id: Mapped[int | None] = mapped_column(BigInteger)
+    kind: Mapped[str] = mapped_column(Text, default="general")
     title: Mapped[str] = mapped_column(Text)
+    body: Mapped[str | None] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(Text)
+    project_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 

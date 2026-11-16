@@ -10,6 +10,7 @@ from app.api.routes.workspaces import hash_token
 from app.db.models import Invitation, Profile, Project, ProjectMember, Workspace, WorkspaceMember
 from app.db.session import SessionLocal
 from app.schemas.workspace import InvitationPreview, ReceivedInvitation
+from app.services.notifications import actor_name, notify
 
 router = APIRouter(prefix="/invitations", tags=["invitaciones"])
 
@@ -42,6 +43,12 @@ def _accept(db: Session, inv: Invitation, user) -> None:
 
     inv.status = "accepted"
     inv.responded_at = datetime.now(timezone.utc)
+    project = db.get(Project, inv.project_id) if inv.project_id else None
+    workspace = db.get(Workspace, inv.workspace_id)
+    notify(db, [inv.invited_by], actor_id=user.id, kind="membership", project_id=inv.project_id,
+           link=f"/miembros?proyecto={inv.project_id}" if inv.project_id else "/miembros",
+           title=f"{actor_name(db, user.id)} aceptó tu invitación",
+           body=f"Ahora es parte de {project.name if project else workspace.name}")
     db.commit()
 
 

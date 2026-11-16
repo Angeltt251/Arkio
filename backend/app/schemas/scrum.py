@@ -122,6 +122,7 @@ class SprintsOut(ProjectHeader):
     candidates: list[PbiOut]  # PBIs que se pueden seleccionar en una nueva Sprint Planning
     velocity: float | None  # promedio de puntos terminados en los últimos 3 Sprints cerrados
     members: list[BoardMember]
+    default_weeks: int = 2  # duración sugerida, según la configuración del espacio
 
 
 class SprintCreate(CamelModel):

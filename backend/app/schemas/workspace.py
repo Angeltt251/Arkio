@@ -11,22 +11,82 @@ ProjectRoleName = Literal["product_owner", "scrum_master", "developer", "observe
 ProjectStatusName = Literal["planning", "active", "paused", "closed"]
 
 
+NotificationKind = Literal["task_assigned", "task_update", "sprint", "membership", "retro_action"]
+StartPage = Literal["/", "/espacios", "/tableros", "/backlog", "/sprints", "/reportes"]
+
+
+class NotifyPreferences(CamelModel):
+    task_assigned: bool = True
+    task_update: bool = True
+    sprint: bool = True
+    membership: bool = True
+    retro_action: bool = True
+
+
+class EmailPreferences(CamelModel):
+    task_assigned: bool = False
+    sprint: bool = False
+    retro_action: bool = False
+
+
+class Preferences(CamelModel):
+    notify: NotifyPreferences = Field(default_factory=NotifyPreferences)
+    email: EmailPreferences = Field(default_factory=EmailPreferences)
+    reduce_motion: bool = False
+    start_page: StartPage = "/"
+
+
 class ProfileOut(CamelModel):
     id: UUID
     email: str
     full_name: str
     avatar_url: str | None = None
     theme: str
+    preferences: Preferences = Field(default_factory=Preferences)
+    created_at: datetime | None = None
 
 
 class ProfileUpdate(CamelModel):
     full_name: str | None = Field(default=None, min_length=2, max_length=80)
-    avatar_url: str | None = None
+    avatar_url: str | None = Field(default=None, max_length=500, pattern=r"^(https://\S+)?$")
     theme: Literal["light", "dark", "system"] | None = None
+    preferences: Preferences | None = None
+
+
+class NotificationOut(CamelModel):
+    id: int
+    kind: str
+    title: str
+    body: str | None
+    link: str | None
+    project_id: UUID | None
+    project_name: str | None = None
+    project_color: str | None = None
+    actor_name: str | None = None
+    actor_avatar: str | None = None
+    read_at: datetime | None
+    created_at: datetime
+
+
+class NotificationsOut(CamelModel):
+    items: list[NotificationOut]
+    unread: int
+
+
+class NotificationsRead(CamelModel):
+    ids: list[int] | None = Field(default=None, description="Sin ids: marca todas como leídas")
 
 
 class WorkspaceCreate(CamelModel):
     name: str = Field(min_length=2, max_length=80)
+
+
+class WorkspaceSettings(CamelModel):
+    """Se guarda en `workspaces.settings` (jsonb)."""
+
+    members_can_create_projects: bool = True
+    default_template: str = "scrum"
+    default_sprint_weeks: int = Field(default=2, ge=1, le=4)
 
 
 class WorkspaceOut(CamelModel):
@@ -34,6 +94,8 @@ class WorkspaceOut(CamelModel):
     name: str
     role: WorkspaceRoleName
     created_at: datetime
+    owner_id: UUID | None = None
+    settings: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
 
 
 class ProjectCreate(CamelModel):
@@ -59,6 +121,7 @@ class ProjectOut(CamelModel):
     archived_at: datetime | None = None
     can_manage: bool = False  # editar, completar o archivar (PO, SM o admin del espacio)
     can_delete: bool = False  # eliminar: admin del espacio y sin Sprints (los Sprints no se borran)
+    my_role: ProjectRoleName | None = None  # rol Scrum del usuario en el proyecto (None: acceso como admin)
 
 
 class ProjectUpdate(CamelModel):
@@ -66,10 +129,12 @@ class ProjectUpdate(CamelModel):
     description: str | None = Field(None, max_length=500)
     color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
     status: ProjectStatusName | None = None
+    product_goal: str | None = Field(None, max_length=1000)
 
 
 class WorkspaceUpdate(CamelModel):
-    name: str = Field(min_length=2, max_length=80)
+    name: str | None = Field(default=None, min_length=2, max_length=80)
+    settings: WorkspaceSettings | None = None
 
 
 class MemberOut(CamelModel):

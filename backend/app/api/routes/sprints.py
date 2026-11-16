@@ -22,9 +22,11 @@ from app.db.models import (
     Sprint,
     SprintItem,
     Task,
+    Workspace,
 )
 from app.schemas.scrum import SprintClose, SprintCreate, SprintOut, SprintPbi, SprintsOut, SprintUpdate
-from app.services.permissions import project_access, require_project_manager
+from app.services.notifications import actor_name, notify, project_member_ids
+from app.services.permissions import project_access, require_project_manager, workspace_settings
 from app.services.scrum import header, pbi_outs, project_members, task_progress
 
 router = APIRouter(tags=["sprints"])
@@ -81,6 +83,12 @@ def _managed_sprint(db: Session, sprint_id: UUID, user_id: UUID) -> Sprint:
     return sprint
 
 
+def _notify_started(db: Session, project: Project, sprint: Sprint, actor_id: UUID) -> None:
+    notify(db, project_member_ids(db, project.id), actor_id=actor_id, kind="sprint", project_id=project.id,
+           link=f"/tableros?proyecto={project.id}",
+           title=f"Comenzó el Sprint {sprint.number} de {project.name}", body=f"Sprint Goal: {sprint.goal}")
+
+
 @router.get("/projects/{project_id}/sprints", response_model=SprintsOut)
 def list_sprints(project_id: UUID, user: CurrentUser, db: UserDB) -> SprintsOut:
     project = project_access(db, project_id, user.id)
@@ -96,6 +104,7 @@ def list_sprints(project_id: UUID, user: CurrentUser, db: UserDB) -> SprintsOut:
     return SprintsOut(
         **header(db, project, user.id), sprints=sprints, candidates=pbi_outs(db, candidates),
         velocity=_velocity(sprints), members=project_members(db, project_id, include_observers=False),
+        default_weeks=workspace_settings(db.get(Workspace, project.workspace_id)).default_sprint_weeks,
     )
 
 
@@ -166,6 +175,8 @@ def plan_sprint(project_id: UUID, payload: SprintCreate, user: CurrentUser, db: 
         db.add(EventAttendee(event_id=planning.id, user_id=uid))
     if payload.start_now and project.status == "planning":
         project.status = "active"
+    if payload.start_now:
+        _notify_started(db, project, sprint, user.id)
     db.commit()
     db.refresh(sprint)
     return _sprint_out(db, sprint)
@@ -201,6 +212,7 @@ def start_sprint(sprint_id: UUID, user: CurrentUser, db: UserDB) -> SprintOut:
     project = db.get(Project, sprint.project_id)
     if project.status == "planning":
         project.status = "active"
+    _notify_started(db, project, sprint, user.id)
     db.commit()
     db.refresh(sprint)
     return _sprint_out(db, sprint)
@@ -231,6 +243,12 @@ def close_sprint(sprint_id: UUID, payload: SprintClose, user: CurrentUser, db: U
     sprint.status = payload.outcome
     sprint.close_reason = reason
     sprint.closed_at = datetime.now(timezone.utc)
+    project = db.get(Project, sprint.project_id)
+    verb = "se canceló" if payload.outcome == "cancelled" else "se cerró"
+    notify(db, project_member_ids(db, project.id), actor_id=user.id, kind="sprint", project_id=project.id,
+           link=f"/reportes?proyecto={project.id}",
+           title=f"{actor_name(db, user.id)}: {verb} el Sprint {sprint.number} de {project.name}",
+           body=reason or f"Sprint Goal: {sprint.goal}")
     db.commit()
     db.refresh(sprint)
     return _sprint_out(db, sprint)

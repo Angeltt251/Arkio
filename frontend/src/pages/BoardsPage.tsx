@@ -153,6 +153,19 @@ export function BoardsPage() {
     };
   }, [token, projectId, loadBoard]);
 
+  // Enlace desde una notificación: ?tarea=<id> abre esa tarjeta
+  const taskParam = params.get('tarea');
+  useEffect(() => {
+    if (!board || !taskParam) return;
+    const task = board.columns.flatMap((c) => c.tasks).find((t) => t.id === taskParam);
+    if (task) setEditing(task);
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      next.delete('tarea');
+      return next;
+    }, { replace: true });
+  }, [board, taskParam, setParams]);
+
   const membersById = new Map(board?.members.map((m) => [m.id, m]) ?? []);
   const labelsById = new Map(board?.labels.map((l) => [l.id, l]) ?? []);
 

@@ -1,6 +1,4 @@
-import { useEffect } from 'react';
-import { Link, useOutletContext } from 'react-router-dom';
-import type { LayoutContext } from '@/components/layout/AppLayout';
+import { Link } from 'react-router-dom';
 import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
 import { BurndownChart } from '@/components/dashboard/BurndownChart';
 import { CurrentSprintCard } from '@/components/dashboard/CurrentSprintCard';
@@ -13,12 +11,7 @@ import { useDashboard } from '@/hooks/useDashboard';
 export function DashboardPage() {
   const { user } = useAuth();
   const { data, loading, source } = useDashboard();
-  const { setNotifications } = useOutletContext<LayoutContext>();
   const firstName = user?.fullName.split(' ')[0] ?? '';
-
-  useEffect(() => {
-    if (data) setNotifications(data.unreadNotifications);
-  }, [data, setNotifications]);
 
   return (
     <div className="dashboard">

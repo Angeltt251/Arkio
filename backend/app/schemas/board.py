@@ -111,6 +111,15 @@ class LabelCreate(CamelModel):
     color: str = Field(default="#64748B", pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
+class LabelUpdate(CamelModel):
+    name: str | None = Field(default=None, min_length=1, max_length=30)
+    color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
+
+
+class LabelUsage(LabelOut):
+    task_count: int
+
+
 class ChecklistItemOut(CamelModel):
     id: UUID
     content: str

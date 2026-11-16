@@ -51,6 +51,7 @@ interface SprintsData extends ProjectHeader {
   candidates: Pbi[];
   velocity: number | null;
   members: Member[];
+  defaultWeeks: number;
 }
 
 const WEEK_OPTIONS = [1, 2, 3, 4];
@@ -232,9 +233,9 @@ interface PlanningDialogProps {
 
 function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated }: PlanningDialogProps) {
   const today = isoDate(new Date());
-  const [weeks, setWeeks] = useState<number | null>(2);
+  const [weeks, setWeeks] = useState<number | null>(data.defaultWeeks);
   const [startDate, setStartDate] = useState(today);
-  const [endDate, setEndDate] = useState(addDays(today, 13));
+  const [endDate, setEndDate] = useState(addDays(today, data.defaultWeeks * 7 - 1));
   const [goal, setGoal] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [plan, setPlan] = useState('');

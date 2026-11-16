@@ -11,8 +11,9 @@ from app.api.deps import CurrentUser, UserDB
 from app.db.models import ActivityLog, Profile, Project, ProjectMember, Sprint, WorkspaceMember
 from app.schemas.logbook import LogActor, LogbookPage
 from app.schemas.workspace import ActivityOut, ProjectMemberOut, ProjectMemberSet, ProjectOut, ProjectUpdate
-from app.services.dashboard import TZ
+from app.services.dashboard import ROLE_ES, TZ
 from app.services.logbook import CATEGORIES, logbook_actors, query_logbook
+from app.services.notifications import actor_name, notify
 from app.services.permissions import (
     ADMIN_ROLES,
     accessible_project_ids,
@@ -25,15 +26,16 @@ router = APIRouter(prefix="/projects", tags=["proyectos y bitácora"])
 
 
 @router.get("", response_model=list[ProjectOut])
-def list_my_projects(user: CurrentUser, db: UserDB) -> list[Project]:
+def list_my_projects(user: CurrentUser, db: UserDB) -> list[ProjectOut]:
     """Todos los proyectos a los que el usuario tiene acceso, en cualquier espacio."""
     ids = accessible_project_ids(db, user.id)
-    return list(db.scalars(select(Project).where(Project.id.in_(ids)).order_by(Project.created_at))) if ids else []
+    projects = list(db.scalars(select(Project).where(Project.id.in_(ids)).order_by(Project.created_at))) if ids else []
+    return project_outs(db, projects, user.id)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
-def get_project(project_id: UUID, user: CurrentUser, db: UserDB) -> Project:
-    return project_access(db, project_id, user.id)
+def get_project(project_id: UUID, user: CurrentUser, db: UserDB) -> ProjectOut:
+    return project_outs(db, [project_access(db, project_id, user.id)], user.id)[0]
 
 
 def _active_sprint_guard(db, project_id: UUID, action: str) -> None:
@@ -51,10 +53,11 @@ def update_project(project_id: UUID, payload: ProjectUpdate, user: CurrentUser, 
         _active_sprint_guard(db, project_id, "marcar el proyecto como completado")
     if "name" in changes and changes["name"]:
         changes["name"] = changes["name"].strip()
-    if "description" in changes:
-        changes["description"] = (changes["description"] or "").strip() or None
+    for field in ("description", "product_goal"):
+        if field in changes:
+            changes[field] = (changes[field] or "").strip() or None
     for field, value in changes.items():
-        if value is not None or field == "description":
+        if value is not None or field in ("description", "product_goal"):
             setattr(project, field, value)
     db.commit()
     db.refresh(project)
@@ -224,11 +227,17 @@ def set_project_member(
     if ws_member is None or ws_member.status != "active":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Primero debe ser miembro activo del espacio de trabajo")
     member = db.get(ProjectMember, (project_id, member_id))
+    role = ROLE_ES.get(payload.role, payload.role)
     if member is None:
         member = ProjectMember(project_id=project_id, user_id=member_id, role=payload.role)
         db.add(member)
+        title = f"{actor_name(db, user.id)} te agregó al proyecto {project.name}"
     else:
+        title = f"{actor_name(db, user.id)} cambió tu rol en {project.name}" if member.role != payload.role else None
         member.role = payload.role
+    if title:
+        notify(db, [member_id], actor_id=user.id, kind="membership", project_id=project_id,
+               link=f"/tableros?proyecto={project_id}", title=title, body=f"Tu rol: {role}")
     db.commit()
     profile = db.get(Profile, member_id)
     return ProjectMemberOut(

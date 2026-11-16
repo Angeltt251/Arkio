@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { useAuth } from '@/context/AuthContext';
+import { startPage } from '@/lib/profile';
 import { AuthLayout } from './AuthLayout';
 
 export function LoginPage() {
@@ -9,7 +10,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state as { from?: string; email?: string } | null;
-  const from = state?.from ?? '/';
+  const from = state?.from && state.from !== '/' ? state.from : startPage();
   const [email, setEmail] = useState(state?.email ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);

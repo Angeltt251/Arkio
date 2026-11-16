@@ -3,13 +3,22 @@
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Project, ProjectMember, Sprint, WorkspaceMember
-from app.schemas.workspace import ProjectOut
+from app.db.models import Project, ProjectMember, Sprint, Workspace, WorkspaceMember
+from app.schemas.workspace import ProjectOut, WorkspaceSettings
 
 ADMIN_ROLES = ("owner", "admin")
+
+
+def workspace_settings(workspace: Workspace) -> WorkspaceSettings:
+    """Configuración del espacio (`workspaces.settings`) con los valores por defecto."""
+    try:
+        return WorkspaceSettings.model_validate(workspace.settings or {})
+    except ValidationError:
+        return WorkspaceSettings()
 
 
 def workspace_membership(db: Session, workspace_id: UUID, user_id: UUID) -> WorkspaceMember:
@@ -113,5 +122,7 @@ def project_outs(db: Session, projects: list[Project], user_id: UUID) -> list[Pr
         item = ProjectOut.model_validate(p)
         item.can_manage = can_manage(db, p, user_id)
         item.can_delete = is_admin and p.id not in with_sprints
+        member = db.get(ProjectMember, (p.id, user_id))
+        item.my_role = member.role if member else None
         out.append(item)
     return out

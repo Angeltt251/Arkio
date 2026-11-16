@@ -36,11 +36,14 @@ from app.schemas.board import (
     ColumnUpdate,
     LabelCreate,
     LabelOut,
+    LabelUpdate,
+    LabelUsage,
     TaskCreate,
     TaskMove,
     TaskOut,
     TaskUpdate,
 )
+from app.services.notifications import actor_name, notify
 from app.services.permissions import can_edit, can_manage, project_access, require_project_manager
 
 router = APIRouter(tags=["tablero"])
@@ -117,7 +120,24 @@ def _project_member_ids(db: Session, project_id: UUID) -> set[UUID]:
     return set(db.scalars(select(ProjectMember.user_id).where(ProjectMember.project_id == project_id)))
 
 
-def _set_assignees(db: Session, task: Task, user_ids: list[UUID]) -> None:
+def _task_link(task: Task) -> str:
+    return f"/tableros?proyecto={task.project_id}&tarea={task.id}"
+
+
+def _notify_assigned(db: Session, task: Task, user_ids: set[UUID], actor_id: UUID) -> None:
+    notify(db, user_ids, actor_id=actor_id, kind="task_assigned", project_id=task.project_id, link=_task_link(task),
+           title=f"{actor_name(db, actor_id)} te asignó una tarea", body=task.title)
+
+
+def _notify_assignees(db: Session, task: Task, actor_id: UUID, title: str, body: str | None = None) -> None:
+    """Avisa a los responsables de la tarea (menos a quien hizo el cambio)."""
+    assignees = set(db.scalars(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)))
+    notify(db, assignees, actor_id=actor_id, kind="task_update", project_id=task.project_id, link=_task_link(task),
+           title=title, body=body)
+
+
+def _set_assignees(db: Session, task: Task, user_ids: list[UUID]) -> set[UUID]:
+    """Deja como responsables exactamente a `user_ids`; devuelve los recién asignados."""
     allowed = _project_member_ids(db, task.project_id)
     wanted = set(user_ids)
     if not wanted <= allowed:
@@ -127,6 +147,7 @@ def _set_assignees(db: Session, task: Task, user_ids: list[UUID]) -> None:
         db.delete(db.get(TaskAssignee, (task.id, uid)))
     for uid in wanted - current:
         db.add(TaskAssignee(task_id=task.id, user_id=uid))
+    return wanted - current
 
 
 def _editable_task(db: Session, task_id: UUID, user_id: UUID) -> Task:
@@ -204,7 +225,7 @@ def create_task(project_id: UUID, payload: TaskCreate, user: CurrentUser, db: Us
         )
     db.add(task)
     db.flush()
-    _set_assignees(db, task, payload.assignee_ids)
+    _notify_assigned(db, task, _set_assignees(db, task, payload.assignee_ids), user.id)
     _set_labels(db, task, payload.label_ids)
     db.commit()
     db.refresh(task)
@@ -221,10 +242,14 @@ def update_task(task_id: UUID, payload: TaskUpdate, user: CurrentUser, db: UserD
         changes["title"] = changes["title"].strip()
     if changes.get("is_blocked") is False:
         changes["blocked_reason"] = None
+    newly_blocked = changes.get("is_blocked") is True and not task.is_blocked
     for field, value in changes.items():
         setattr(task, field, value)
+    if newly_blocked:
+        _notify_assignees(db, task, user.id, f"{actor_name(db, user.id)} marcó como bloqueada una tarea tuya",
+                          f"{task.title}" + (f" — {task.blocked_reason}" if task.blocked_reason else ""))
     if payload.assignee_ids is not None:
-        _set_assignees(db, task, payload.assignee_ids)
+        _notify_assigned(db, task, _set_assignees(db, task, payload.assignee_ids), user.id)
     if payload.label_ids is not None:
         _set_labels(db, task, payload.label_ids)
     db.commit()
@@ -257,6 +282,8 @@ def move_task(task_id: UUID, payload: TaskMove, user: CurrentUser, db: UserDB) -
     else:
         position = (before + after) / 2
 
+    if column.is_done and task.column_id != column.id:
+        _notify_assignees(db, task, user.id, f"{actor_name(db, user.id)} terminó una tarea tuya", task.title)
     task.column_id = column.id  # el trigger ajusta completed_at según la columna "terminado"
     task.position = position
     db.commit()
@@ -407,6 +434,35 @@ def create_label(project_id: UUID, payload: LabelCreate, user: CurrentUser, db: 
         raise HTTPException(status.HTTP_409_CONFLICT, f"Ya existe la etiqueta «{name}»")
     label = Label(project_id=project_id, name=name, color=payload.color)
     db.add(label)
+    db.commit()
+    db.refresh(label)
+    return label
+
+
+@router.get("/projects/{project_id}/labels", response_model=list[LabelUsage])
+def list_labels(project_id: UUID, user: CurrentUser, db: UserDB) -> list[LabelUsage]:
+    project_access(db, project_id, user.id)
+    counts = dict(db.execute(
+        select(TaskLabel.label_id, func.count()).join(Task, Task.id == TaskLabel.task_id)
+        .where(Task.project_id == project_id, Task.archived_at.is_(None)).group_by(TaskLabel.label_id)
+    ).all())
+    return [LabelUsage(id=lb.id, name=lb.name, color=lb.color, task_count=counts.get(lb.id, 0))
+            for lb in _labels(db, project_id)]
+
+
+@router.patch("/labels/{label_id}", response_model=LabelOut)
+def update_label(label_id: UUID, payload: LabelUpdate, user: CurrentUser, db: UserDB) -> Label:
+    label = db.get(Label, label_id)
+    if label is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Etiqueta no encontrada")
+    project_access(db, label.project_id, user.id, write=True)
+    if payload.name is not None:
+        name = payload.name.strip()
+        if any(lb.id != label.id and lb.name.lower() == name.lower() for lb in _labels(db, label.project_id)):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"Ya existe la etiqueta «{name}»")
+        label.name = name
+    if payload.color is not None:
+        label.color = payload.color
     db.commit()
     db.refresh(label)
     return label

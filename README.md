@@ -71,6 +71,9 @@ Arkio/
 
 - **Espacios de trabajo**: editar proyectos, marcarlos como completados (y reabrirlos), archivarlos (salen del menú y de Miembros, sin perder nada) y restaurarlos. Un proyecto sin Sprints se puede eliminar escribiendo su clave; uno con Sprints solo se archiva, para conservar su historia. Renombrar el espacio (administradores) y eliminarlo (solo el propietario, escribiendo su nombre).
 
+- **Configuración**: perfil (nombre y foto), seguridad (cambiar contraseña confirmando la actual, cerrar sesión en otros dispositivos), apariencia (tema claro/oscuro/sistema guardado en el perfil, reducir animaciones, página de inicio), notificaciones (qué avisos llegan a la campana y cuáles también por correo), espacio de trabajo (nombre, si los miembros pueden crear proyectos, duración sugerida de Sprints y tablero inicial), proyecto (datos, Product Goal y etiquetas) y matriz de permisos por rol.
+- **Notificaciones**: campana con avisos personales al asignar tareas, terminar o bloquear una tarea tuya, iniciar/cerrar Sprints, asignar acciones de mejora, agregarte a un proyecto o cambiar tu rol. Cada aviso enlaza a lo que pasó.
+
 Las demás secciones del menú muestran una página que indica en qué iteración se construyen.
 
 ## Puesta en marcha

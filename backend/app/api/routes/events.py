@@ -21,6 +21,7 @@ from app.schemas.scrum import (
     RetroActionOut,
     RetroActionUpdate,
 )
+from app.services.notifications import actor_name, notify
 from app.services.permissions import project_access
 from app.services.scrum import header, project_members
 
@@ -56,7 +57,7 @@ def _set_attendees(db: Session, event: ScrumEvent, user_ids: list[UUID]) -> None
         db.add(EventAttendee(event_id=event.id, user_id=uid))
 
 
-def _add_actions(db: Session, event: ScrumEvent, actions: list[RetroActionIn]) -> None:
+def _add_actions(db: Session, event: ScrumEvent, actions: list[RetroActionIn], actor_id: UUID) -> None:
     if not actions:
         return
     if event.type != "sprint_retrospective":
@@ -67,6 +68,12 @@ def _add_actions(db: Session, event: ScrumEvent, actions: list[RetroActionIn]) -
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "El responsable debe ser miembro del proyecto")
         db.add(RetroAction(project_id=event.project_id, event_id=event.id, description=action.description.strip(),
                            owner_id=action.owner_id, due_date=action.due_date))
+        if action.owner_id:
+            notify(db, [action.owner_id], actor_id=actor_id, kind="retro_action", project_id=event.project_id,
+                   link=f"/eventos?proyecto={event.project_id}",
+                   title=f"{actor_name(db, actor_id)} te asignó una acción de mejora",
+                   body=action.description.strip()
+                   + (f" (para el {action.due_date:%d-%m-%Y})" if action.due_date else ""))
 
 
 def _event_outs(db: Session, events: list[ScrumEvent]) -> list[EventOut]:
@@ -134,7 +141,7 @@ def create_event(project_id: UUID, payload: EventCreate, user: CurrentUser, db: 
     db.add(event)
     db.flush()
     _set_attendees(db, event, payload.attendee_ids)
-    _add_actions(db, event, payload.actions)
+    _add_actions(db, event, payload.actions, user.id)
     db.commit()
     db.refresh(event)
     return _event_outs(db, [event])[0]
@@ -153,7 +160,7 @@ def update_event(event_id: UUID, payload: EventUpdate, user: CurrentUser, db: Us
         event.data = _clean_data(event.type, payload.data)
     if payload.attendee_ids is not None:
         _set_attendees(db, event, payload.attendee_ids)
-    _add_actions(db, event, payload.new_actions)
+    _add_actions(db, event, payload.new_actions, user.id)
     db.commit()
     db.refresh(event)
     return _event_outs(db, [event])[0]

@@ -13,6 +13,7 @@ interface Workspace {
   name: string;
   role: 'owner' | 'admin' | 'member';
   createdAt: string;
+  settings: { membersCanCreateProjects: boolean; defaultTemplate: string; defaultSprintWeeks: number };
 }
 
 interface Project {
@@ -153,7 +154,7 @@ export function WorkspacesPage() {
     setDescription('');
     setColor(PROJECT_COLORS[0]);
     setMyRole('product_owner');
-    setTemplate('scrum');
+    setTemplate(selected?.settings.defaultTemplate ?? 'scrum');
     setProjectError(null);
   };
 
@@ -224,6 +225,7 @@ export function WorkspacesPage() {
 
   const keyValid = /^[A-Z][A-Z0-9]{1,5}$/.test(projectKey);
   const selected = workspaces.find((w) => w.id === selectedId) ?? null;
+  const canCreate = !!selected && (selected.role !== 'member' || selected.settings.membersCanCreateProjects);
   const counts = { active: 0, completed: 0, archived: 0 } as Record<View, number>;
   projects.forEach((p) => { counts[viewOf(p)] += 1; });
   const visible = projects.filter((p) => viewOf(p) === view);
@@ -235,8 +237,8 @@ export function WorkspacesPage() {
           <h1>Espacios de trabajo</h1>
           <p className="muted">Crea un espacio y organiza tus proyectos dentro de él.</p>
         </div>
-        {selected && !showProjectForm && (
-          <button className="btn btn--primary" onClick={() => setShowProjectForm(true)}>
+        {selected && canCreate && !showProjectForm && (
+          <button className="btn btn--primary" onClick={() => { resetProjectForm(); setShowProjectForm(true); }}>
             <Icon name="plus" size={18} /> Nuevo Proyecto
           </button>
         )}
@@ -354,9 +356,9 @@ export function WorkspacesPage() {
             ) : projects.length === 0 ? (
               <div className="empty">
                 <p>{selected ? 'Este espacio aún no tiene proyectos.' : 'Primero crea un espacio de trabajo.'}</p>
-                {selected && (
+                {selected && canCreate && (
                   <button className="btn btn--primary btn--sm" style={{ justifySelf: 'center' }}
-                    onClick={() => setShowProjectForm(true)}>
+                    onClick={() => { resetProjectForm(); setShowProjectForm(true); }}>
                     <Icon name="plus" size={16} /> Crear el primer proyecto
                   </button>
                 )}
