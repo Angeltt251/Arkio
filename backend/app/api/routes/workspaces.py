@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.api.deps import CurrentUser, UserDB
 from app.core.config import settings
@@ -33,9 +33,14 @@ from app.services.templates import TEMPLATES_BY_ID, apply_template
 router = APIRouter(prefix="/workspaces", tags=["espacios de trabajo"])
 
 
-def _workspace_out(workspace: Workspace, role: str) -> WorkspaceOut:
-    return WorkspaceOut(id=workspace.id, name=workspace.name, role=role, created_at=workspace.created_at,
-                        owner_id=workspace.owner_id, settings=workspace_settings(workspace))
+def _workspace_out(db, workspace: Workspace, role: str) -> WorkspaceOut:
+    owner = db.get(Profile, workspace.owner_id)
+    members = db.scalar(select(func.count()).where(
+        WorkspaceMember.workspace_id == workspace.id, WorkspaceMember.status == "active"))
+    return WorkspaceOut(id=workspace.id, name=workspace.name, description=workspace.description, role=role,
+                        created_at=workspace.created_at, owner_id=workspace.owner_id,
+                        owner_name=(owner.full_name or owner.email) if owner else None, member_count=members or 0,
+                        settings=workspace_settings(workspace))
 
 
 @router.get("", response_model=list[WorkspaceOut])
@@ -46,16 +51,19 @@ def list_workspaces(user: CurrentUser, db: UserDB) -> list[WorkspaceOut]:
         .where(WorkspaceMember.user_id == user.id, WorkspaceMember.status == "active")
         .order_by(Workspace.created_at)
     )
-    return [_workspace_out(ws, role) for ws, role in rows]
+    return [_workspace_out(db, ws, role) for ws, role in rows]
 
 
 @router.post("", response_model=WorkspaceOut, status_code=status.HTTP_201_CREATED)
 def create_workspace(payload: WorkspaceCreate, user: CurrentUser, db: UserDB) -> WorkspaceOut:
-    workspace = Workspace(name=payload.name.strip(), owner_id=user.id)
+    """Paso 1 del ciclo: el equipo (nombre y descripción) con quien lo crea como propietario.
+    Los demás miembros se invitan después con POST /{id}/invitations."""
+    workspace = Workspace(name=payload.name.strip(), description=(payload.description or "").strip() or None,
+                          owner_id=user.id)
     db.add(workspace)
     db.commit()  # el trigger `add_workspace_owner` deja al creador como propietario
     db.refresh(workspace)
-    return _workspace_out(workspace, "owner")
+    return _workspace_out(db, workspace, "owner")
 
 
 @router.patch("/{workspace_id}", response_model=WorkspaceOut)
@@ -65,12 +73,14 @@ def update_workspace(workspace_id: UUID, payload: WorkspaceUpdate, user: Current
     workspace = db.get(Workspace, workspace_id)
     if payload.name is not None:
         workspace.name = payload.name.strip()
+    if "description" in payload.model_fields_set:
+        workspace.description = (payload.description or "").strip() or None
     if payload.settings is not None:
         if payload.settings.default_template not in TEMPLATES_BY_ID:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Esa plantilla de tablero no existe")
         workspace.settings = {**(workspace.settings or {}), **payload.settings.model_dump()}
     db.commit()
-    return _workspace_out(workspace, member.role)
+    return _workspace_out(db, workspace, member.role)
 
 
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -121,14 +131,23 @@ def create_project(workspace_id: UUID, payload: ProjectCreate, user: CurrentUser
     if exists:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Ya existe un proyecto con la clave {payload.key}")
 
+    lead_id = payload.lead_id or user.id
+    lead = db.get(WorkspaceMember, (workspace_id, lead_id))
+    if lead is None or lead.status != "active":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El responsable debe ser miembro activo del espacio")
+
+    # El Product Goal no se pide aquí: se define en el paso 4, antes de crear el Product Backlog
     project = Project(
-        workspace_id=workspace_id, key=payload.key, name=payload.name.strip(), description=payload.description,
-        product_goal=payload.product_goal, color=payload.color, created_by=user.id,
+        workspace_id=workspace_id, key=payload.key, name=payload.name.strip(),
+        description=(payload.description or "").strip() or None, project_type=payload.project_type,
+        lead_id=lead_id, color=payload.color, created_by=user.id,
     )
     db.add(project)
     db.flush()  # el trigger crea el tablero con columnas por defecto
     apply_template(db, project, payload.template, user.id)  # columnas y tareas iniciales
     db.add(ProjectMember(project_id=project.id, user_id=user.id, role=payload.my_role))
+    if lead_id != user.id:  # su rol Scrum se ajusta al configurar el equipo (paso 3)
+        db.add(ProjectMember(project_id=project.id, user_id=lead_id, role="developer"))
     db.commit()
     db.refresh(project)
     return project_outs(db, [project], user.id)[0]

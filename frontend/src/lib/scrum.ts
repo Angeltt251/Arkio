@@ -18,6 +18,8 @@ export interface ProjectHeader {
   projectName: string;
   projectKey: string;
   productGoal: string | null;
+  /** Criterios que todo trabajo debe cumplir para considerarse terminado. */
+  definitionOfDone: string[];
   canEdit: boolean;
   canManage: boolean;
 }
@@ -42,6 +44,9 @@ export interface Pbi {
   tasksDone: number;
   archived: boolean;
 }
+
+/** Un PBI que estuvo en un Sprint y volvió sin terminar: el Product Owner debe decidir qué hacer con él. */
+export const isReturned = (pbi: Pbi) => pbi.sprintNumber != null && ['new', 'refined', 'ready'].includes(pbi.status);
 
 export const PRIORITY_LABEL: Record<Priority, string> = { low: 'Baja', medium: 'Media', high: 'Alta', critical: 'Crítica' };
 

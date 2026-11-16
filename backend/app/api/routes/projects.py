@@ -9,9 +9,11 @@ from sqlalchemy import select
 
 from app.api.deps import CurrentUser, UserDB
 from app.db.models import ActivityLog, Profile, Project, ProjectMember, Sprint, WorkspaceMember
+from app.schemas.lifecycle import LifecycleOut
 from app.schemas.logbook import LogActor, LogbookPage
 from app.schemas.workspace import ActivityOut, ProjectMemberOut, ProjectMemberSet, ProjectOut, ProjectUpdate
 from app.services.dashboard import ROLE_ES, TZ
+from app.services.lifecycle import project_lifecycle
 from app.services.logbook import CATEGORIES, logbook_actors, query_logbook
 from app.services.notifications import actor_name, notify
 from app.services.permissions import (
@@ -38,6 +40,12 @@ def get_project(project_id: UUID, user: CurrentUser, db: UserDB) -> ProjectOut:
     return project_outs(db, [project_access(db, project_id, user.id)], user.id)[0]
 
 
+@router.get("/{project_id}/lifecycle", response_model=LifecycleOut)
+def get_lifecycle(project_id: UUID, user: CurrentUser, db: UserDB) -> LifecycleOut:
+    """Los 12 pasos del ciclo de vida, cuáles están hechos y cuál sigue."""
+    return project_lifecycle(db, project_access(db, project_id, user.id), user.id)
+
+
 def _active_sprint_guard(db, project_id: UUID, action: str) -> None:
     active = db.scalar(select(Sprint.number).where(Sprint.project_id == project_id, Sprint.status == "active"))
     if active:
@@ -46,13 +54,21 @@ def _active_sprint_guard(db, project_id: UUID, action: str) -> None:
 
 @router.patch("/{project_id}", response_model=ProjectOut)
 def update_project(project_id: UUID, payload: ProjectUpdate, user: CurrentUser, db: UserDB) -> ProjectOut:
-    """Editar nombre, descripción, color o estado (Completado = `closed`). PO, SM o admin del espacio."""
+    """Editar datos, responsable, Definition of Done o estado (Completado = `closed`). PO, SM o admin del espacio."""
     project = require_project_manager(db, project_id, user.id)
     changes = payload.model_dump(exclude_unset=True)
     if changes.get("status") == "closed" and project.status != "closed":
         _active_sprint_guard(db, project_id, "marcar el proyecto como completado")
     if "name" in changes and changes["name"]:
         changes["name"] = changes["name"].strip()
+    if changes.get("lead_id"):
+        lead = db.get(WorkspaceMember, (project.workspace_id, changes["lead_id"]))
+        if lead is None or lead.status != "active":
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "El responsable debe ser miembro activo del espacio")
+        if db.get(ProjectMember, (project_id, changes["lead_id"])) is None:
+            db.add(ProjectMember(project_id=project_id, user_id=changes["lead_id"], role="developer"))
+    if changes.get("definition_of_done") is not None:
+        changes["definition_of_done"] = list(dict.fromkeys(changes["definition_of_done"]))  # sin repetidos
     for field in ("description", "product_goal"):
         if field in changes:
             changes[field] = (changes[field] or "").strip() or None

@@ -80,6 +80,9 @@ def _goal_status(sprint: Sprint, pbis_total: int, pbis_done: int) -> str:
         return "planned"
     if sprint.status == "active":
         return "in_progress"
+    goal_met = (sprint.summary or {}).get("goal_met")  # lo decide el equipo al cerrar el Sprint
+    if goal_met is not None:
+        return "achieved" if goal_met else ("partial" if pbis_done else "not_achieved")
     if pbis_total and pbis_done == pbis_total:
         return "achieved"
     return "partial" if pbis_done else "not_achieved"

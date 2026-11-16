@@ -1,6 +1,18 @@
 /** Colores sugeridos para los proyectos (paleta Arkio + acentos). */
 export const PROJECT_COLORS = ['#447794', '#2D5B75', '#123249', '#27AE60', '#F2994A', '#EB5757'];
 
+export type ProjectType = 'software' | 'web' | 'mobile' | 'data' | 'research' | 'academic' | 'other';
+
+export const PROJECT_TYPE_LABEL: Record<ProjectType, string> = {
+  software: 'Software',
+  web: 'Aplicación web',
+  mobile: 'App móvil',
+  data: 'Datos / BI',
+  research: 'Investigación',
+  academic: 'Proyecto académico',
+  other: 'Otro',
+};
+
 /** Clave sugerida a partir del nombre: "Sistema de Ventas" → "SDV". */
 export function suggestKey(name: string): string {
   const words = name.normalize('NFD').replace(/[^A-Za-z0-9 ]/g, '').trim().split(/\s+/).filter(Boolean);

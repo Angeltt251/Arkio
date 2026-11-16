@@ -1,10 +1,10 @@
 """Product Backlog, Sprint Planning y eventos Scrum."""
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, StringConstraints
 
 from app.schemas.board import BoardMember, PriorityName
 from app.schemas.common import CamelModel
@@ -21,6 +21,7 @@ class ProjectHeader(CamelModel):
     project_name: str
     project_key: str
     product_goal: str | None
+    definition_of_done: list[str] = []
     can_edit: bool
     can_manage: bool  # Product Owner, Scrum Master o administrador
 
@@ -101,6 +102,22 @@ class SprintPbi(CamelModel):
     tasks_done: int = 0
 
 
+class SprintSummary(CamelModel):
+    """Lo que queda guardado al cerrar el Sprint: resultados, pendientes, acuerdos y métricas."""
+
+    goal_met: bool | None = None
+    done: list[str] = []  # PBIs terminados ("SAL-3 · Título")
+    returned: list[str] = []  # PBIs que vuelven al Product Backlog para una nueva decisión
+    agreements: list[str] = []  # acuerdos de la Review y la Retrospective
+    improvement_actions: list[str] = []
+    points_committed: float = 0
+    points_done: float = 0
+    tasks_total: int = 0
+    tasks_done: int = 0
+    blocked_tasks: int = 0
+    daily_count: int = 0
+
+
 class SprintOut(CamelModel):
     id: UUID
     number: int
@@ -115,6 +132,9 @@ class SprintOut(CamelModel):
     points_done: float
     task_count: int
     tasks_done: int
+    has_review: bool = False  # ya hay acta de Sprint Review
+    has_retro: bool = False  # ya hay acta de Sprint Retrospective
+    summary: SprintSummary | None = None  # se guarda al cerrar
 
 
 class SprintsOut(ProjectHeader):
@@ -131,7 +151,9 @@ class SprintCreate(CamelModel):
     end_date: date
     item_ids: list[UUID] = Field(min_length=1)
     start_now: bool = False
-    create_tasks: bool = True  # una tarjeta en el tablero por PBI, para que los Developers la descompongan
+    create_tasks: bool = True  # crear en el tablero las tareas de cada PBI
+    # Descomposición: títulos de las tareas de cada PBI. Un PBI sin tareas indicadas lleva una tarjeta con su título.
+    tasks: dict[UUID, list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]]] = {}
     plan: str | None = Field(default=None, max_length=5000)
     attendee_ids: list[UUID] = []
 
@@ -144,6 +166,7 @@ class SprintUpdate(CamelModel):
 class SprintClose(CamelModel):
     outcome: Literal["closed", "cancelled"]
     reason: str | None = Field(default=None, max_length=1000)
+    goal_met: bool | None = None  # ¿se cumplió el Sprint Goal? (al cerrar)
 
 
 # ------------------------------------------------------------------ eventos Scrum

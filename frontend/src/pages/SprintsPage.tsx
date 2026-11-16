@@ -44,6 +44,24 @@ interface Sprint {
   pointsDone: number;
   taskCount: number;
   tasksDone: number;
+  hasReview: boolean;
+  hasRetro: boolean;
+  summary: SprintSummary | null;
+}
+
+/** Lo que se guardó al cerrar el Sprint. */
+interface SprintSummary {
+  goalMet: boolean | null;
+  done: string[];
+  returned: string[];
+  agreements: string[];
+  improvementActions: string[];
+  pointsCommitted: number;
+  pointsDone: number;
+  tasksTotal: number;
+  tasksDone: number;
+  blockedTasks: number;
+  dailyCount: number;
 }
 
 interface SprintsData extends ProjectHeader {
@@ -73,6 +91,11 @@ export function SprintsPage() {
   const open = data?.sprints.filter((s) => s.status === 'active' || s.status === 'planned') ?? [];
   const history = data?.sprints.filter((s) => s.status === 'closed' || s.status === 'cancelled') ?? [];
   const hasActive = open.some((s) => s.status === 'active');
+  // Orden del ciclo: Product Goal (paso 4) y Definition of Done (paso 6) antes de planificar (paso 7)
+  const missing = !data ? [] : [
+    !data.productGoal && 'el Product Goal',
+    !data.definitionOfDone.length && 'la Definition of Done',
+  ].filter(Boolean) as string[];
 
   const start = async (sprint: Sprint) => {
     setBusy(sprint.id);
@@ -111,7 +134,8 @@ export function SprintsPage() {
         <div className="page-head__actions">
           <ProjectSelect projects={projects} value={projectId} onChange={selectProject} />
           {data?.canEdit && (
-            <button type="button" className="btn btn--primary btn--sm" onClick={() => setPlanning(true)}>
+            <button type="button" className="btn btn--primary btn--sm" onClick={() => setPlanning(true)}
+              disabled={missing.length > 0} title={missing.length ? `Primero define ${missing.join(' y ')}` : undefined}>
               <Icon name="plus" size={16} /> Planificar Sprint
             </button>
           )}
@@ -119,6 +143,13 @@ export function SprintsPage() {
       </div>
 
       {(error || actionError) && <p className="form__error" role="alert">{actionError ?? error}</p>}
+
+      {data && missing.length > 0 && (
+        <p className="notice notice--compact" role="status">
+          Antes de la Sprint Planning hay que definir {missing.join(' y ')}.{' '}
+          <Link to={`/backlog?proyecto=${data.projectId}`}>Ir al Product Backlog</Link>
+        </p>
+      )}
 
       {!data ? (
         <div className="skeleton-grid" aria-busy="true" aria-label="Cargando sprints">
@@ -165,7 +196,16 @@ export function SprintsPage() {
           {history.length > 0 && (
             <>
               <h2 className="section-title">Historial</h2>
-              {history.map((sprint) => <SprintCard key={sprint.id} sprint={sprint} compact />)}
+              {history.map((sprint) => (
+                <SprintCard key={sprint.id} sprint={sprint} compact>
+                  {sprint.summary && <SummaryView summary={sprint.summary} />}
+                  <div className="sprint-box__actions">
+                    <Link to={`/reportes?proyecto=${data.projectId}`} className="btn btn--ghost btn--sm">
+                      <Icon name="reports" size={15} /> Informe
+                    </Link>
+                  </div>
+                </SprintCard>
+              ))}
             </>
           )}
         </>
@@ -176,8 +216,8 @@ export function SprintsPage() {
           onClose={() => setPlanning(false)}
           onCreated={() => { setPlanning(false); void reload(); }} />
       )}
-      {closing && (
-        <CloseDialog sprint={closing} token={token} onClose={() => setClosing(null)}
+      {closing && data && (
+        <CloseDialog sprint={closing} projectId={data.projectId} token={token} onClose={() => setClosing(null)}
           onClosed={() => { setClosing(null); void reload(); }} />
       )}
     </div>
@@ -221,6 +261,29 @@ function SprintCard({ sprint, compact = false, children }: { sprint: Sprint; com
   );
 }
 
+function SummaryView({ summary: s }: { summary: SprintSummary }) {
+  return (
+    <div className="sprint-summary">
+      <div className="sprint-summary__metrics muted">
+        <span>Sprint Goal: <strong>{s.goalMet == null ? 'sin evaluar' : s.goalMet ? 'cumplido' : 'no cumplido'}</strong></span>
+        <span>{s.pointsDone}/{s.pointsCommitted} pts</span>
+        <span>{s.tasksDone}/{s.tasksTotal} tareas</span>
+        <span>{s.dailyCount} Daily</span>
+        {s.blockedTasks > 0 && <span>{s.blockedTasks} bloqueadas al cierre</span>}
+      </div>
+      {s.returned.length > 0 && (
+        <div><strong>Volvieron al Product Backlog</strong><ul>{s.returned.map((r) => <li key={r}>{r}</li>)}</ul></div>
+      )}
+      {(s.agreements.length > 0 || s.improvementActions.length > 0) && (
+        <div>
+          <strong>Acuerdos y mejoras</strong>
+          <ul>{[...s.agreements, ...s.improvementActions].map((a, i) => <li key={i}>{a}</li>)}</ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ------------------------------------------------------------ Sprint Planning
 interface PlanningDialogProps {
   data: SprintsData;
@@ -239,8 +302,8 @@ function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated 
   const [goal, setGoal] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [plan, setPlan] = useState('');
+  const [tasks, setTasks] = useState<Record<string, string>>({});
   const [attendees, setAttendees] = useState<string[]>(data.members.map((m) => m.id));
-  const [createTasks, setCreateTasks] = useState(true);
   const [startNow, setStartNow] = useState(!hasActive);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -251,6 +314,10 @@ function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated 
   const unestimated = chosen.filter((c) => c.estimate == null);
   const unrefined = chosen.filter((c) => c.status === 'new');
   const pendingParents = chosen.filter((c) => c.parentId && !selected.includes(c.parentId) && c.parentCode);
+  const sameAsProductGoal = !!data.productGoal &&
+    goal.trim().toLowerCase().replace(/\.$/, '') === data.productGoal.trim().toLowerCase().replace(/\.$/, '');
+  const taskLines = (id: string) => (tasks[id] ?? '').split('\n').map((t) => t.trim()).filter((t) => t.length >= 2);
+  const taskTotal = chosen.reduce((sum, c) => sum + (c.taskCount > c.tasksDone ? 0 : Math.max(taskLines(c.id).length, 1)), 0);
   const length = daysBetween(startDate, endDate) + 1;
   const datesValid = !!startDate && !!endDate && length >= 1 && length <= 32;
 
@@ -275,7 +342,8 @@ function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated 
         method: 'POST',
         body: JSON.stringify({
           goal: goal.trim(), startDate, endDate, itemIds: selected, startNow: startNow && !hasActive,
-          createTasks, plan: plan.trim() || null, attendeeIds: attendees,
+          createTasks: true, tasks: Object.fromEntries(selected.map((id) => [id, taskLines(id)])),
+          plan: plan.trim() || null, attendeeIds: attendees,
         }),
       });
       onCreated();
@@ -359,18 +427,62 @@ function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated 
             )}
           </div>
 
-          <label className="field">
-            <span className="field__row">3. Sprint Goal <span className="muted small">Por qué vale la pena este Sprint, en lenguaje claro</span></span>
+          <div className="field">
+            <span className="field__row">3. Sprint Goal <span className="muted small">El resultado concreto que buscamos en este Sprint</span></span>
+            <p className="planning-goal-context">
+              <strong>Product Goal</strong> (objetivo general del producto): {data.productGoal}
+              <br />
+              <span className="muted">El Sprint Goal es distinto: un paso concreto hacia él que se logra en este Sprint.</span>
+            </p>
             <textarea className="textarea" rows={2} required minLength={5} maxLength={500} value={goal}
+              aria-label="Sprint Goal"
               placeholder="Ej: Los usuarios pueden registrarse e iniciar sesión de forma segura"
               onChange={(e) => setGoal(e.target.value)} />
-          </label>
+            {sameAsProductGoal && (
+              <p className="form__error">Es igual al Product Goal: describe solo lo que se logrará en este Sprint.</p>
+            )}
+          </div>
+
+          {chosen.length > 0 && (
+            <div className="field">
+              <span className="field__row">
+                4. Descomponer en tareas
+                <span className="muted small">Una tarea por línea · {taskTotal} en el tablero</span>
+              </span>
+              <ul className="decompose">
+                {chosen.map((c) => (
+                  <li key={c.id}>
+                    <span className="decompose__head">
+                      <span className="pbi-row__code">{c.code}</span> {c.title}
+                    </span>
+                    {c.taskCount > c.tasksDone ? (
+                      <span className="muted small">
+                        Tiene {c.taskCount - c.tasksDone} tareas pendientes de un Sprint anterior: pasan a este Sprint.
+                      </span>
+                    ) : (
+                      <textarea className="textarea" rows={2} maxLength={4000} value={tasks[c.id] ?? ''}
+                        aria-label={`Tareas de ${c.code}`}
+                        placeholder={`Sin tareas: se crea una tarjeta «${c.title}»`}
+                        onChange={(e) => setTasks((t) => ({ ...t, [c.id]: e.target.value }))} />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <label className="field">
-            <span className="field__row">4. Plan de los Developers <span className="muted small">Opcional</span></span>
+            <span className="field__row">5. Plan de los Developers <span className="muted small">Opcional</span></span>
             <textarea className="textarea" rows={3} maxLength={5000} value={plan}
-              placeholder="Cómo se descompone el trabajo y quién parte con qué…" onChange={(e) => setPlan(e.target.value)} />
+              placeholder="Cómo se abordará el trabajo y quién parte con qué…" onChange={(e) => setPlan(e.target.value)} />
           </label>
+
+          <div className="field">
+            <span>Definition of Done del proyecto</span>
+            <ul className="dod-list small">
+              {data.definitionOfDone.map((c) => <li key={c}><Icon name="check" size={14} /> {c}</li>)}
+            </ul>
+          </div>
 
           {data.members.length > 0 && (
             <div className="field">
@@ -390,10 +502,6 @@ function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated 
           )}
 
           <label className="check">
-            <input type="checkbox" checked={createTasks} onChange={(e) => setCreateTasks(e.target.checked)} />
-            Crear una tarjeta en el tablero por cada PBI (los Developers la descomponen en tareas)
-          </label>
-          <label className="check">
             <input type="checkbox" checked={startNow && !hasActive} disabled={hasActive} onChange={(e) => setStartNow(e.target.checked)} />
             {hasActive ? 'Ya hay un Sprint en curso: este quedará planificado' : 'Iniciar el Sprint ahora'}
           </label>
@@ -405,7 +513,7 @@ function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated 
           <span className="muted small">{datesValid ? `${formatDate(startDate)} → ${formatDate(endDate)} (${length} días)` : ''}</span>
           <span style={{ flex: 1 }} />
           <button type="button" className="btn btn--ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn btn--primary" disabled={busy || !datesValid || selected.length === 0 || goal.trim().length < 5}>
+          <button className="btn btn--primary" disabled={busy || !datesValid || selected.length === 0 || goal.trim().length < 5 || sameAsProductGoal}>
             {busy ? 'Creando…' : 'Confirmar Sprint'}
           </button>
         </footer>
@@ -415,14 +523,16 @@ function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated 
 }
 
 // ------------------------------------------------------------ cerrar / cancelar
-function CloseDialog({ sprint, token, onClose, onClosed }: {
+function CloseDialog({ sprint, projectId, token, onClose, onClosed }: {
   sprint: Sprint;
+  projectId: string;
   token: string | null;
   onClose: () => void;
   onClosed: () => void;
 }) {
   const [outcome, setOutcome] = useState<'closed' | 'cancelled'>(sprint.status === 'planned' ? 'cancelled' : 'closed');
   const [reason, setReason] = useState('');
+  const [goalMet, setGoalMet] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEscape(onClose);
@@ -436,7 +546,7 @@ function CloseDialog({ sprint, token, onClose, onClosed }: {
     try {
       await apiFetch(`/api/sprints/${sprint.id}/close`, token, {
         method: 'POST',
-        body: JSON.stringify({ outcome, reason: reason.trim() || null }),
+        body: JSON.stringify({ outcome, reason: reason.trim() || null, goalMet: outcome === 'closed' ? goalMet : false }),
       });
       onClosed();
     } catch (err) {
@@ -465,6 +575,27 @@ function CloseDialog({ sprint, token, onClose, onClosed }: {
             <input type="radio" name="outcome" checked={outcome === 'cancelled'} onChange={() => setOutcome('cancelled')} />
             Cancelar: el Sprint Goal quedó obsoleto
           </label>
+          {outcome === 'closed' && (
+            <div className="field">
+              <span>¿Se cumplió el Sprint Goal?</span>
+              <p className="muted small" style={{ margin: 0 }}>{sprint.goal}</p>
+              <div className="chips">
+                {([[true, 'Sí'], [false, 'No']] as const).map(([value, label]) => (
+                  <button key={label} type="button" className={`chip chip--plain${goalMet === value ? ' chip--on' : ''}`}
+                    aria-pressed={goalMet === value} onClick={() => setGoalMet(value)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {outcome === 'closed' && (!sprint.hasReview || !sprint.hasRetro) && (
+            <p className="notice notice--compact" style={{ margin: 0 }}>
+              Falta registrar {[!sprint.hasReview && 'la Sprint Review', !sprint.hasRetro && 'la Sprint Retrospective']
+                .filter(Boolean).join(' y ')}: sus acuerdos se guardan en el resumen del cierre.{' '}
+              <Link to={`/eventos?proyecto=${projectId}`}>Registrar en Eventos Scrum</Link>
+            </p>
+          )}
           <label className="field">
             <span>Motivo {outcome === 'cancelled' ? '(obligatorio)' : '(opcional)'}</span>
             <textarea className="textarea" rows={3} maxLength={1000} required={outcome === 'cancelled'} value={reason}
@@ -472,16 +603,17 @@ function CloseDialog({ sprint, token, onClose, onClosed }: {
           </label>
           <p className="notice notice--compact">
             {outcome === 'closed' && pending.length > 0
-              ? `${pending.length} PBI${pending.length === 1 ? '' : 's'} con tareas pendientes ${pending.length === 1 ? 'vuelve' : 'vuelven'} al Product Backlog como «Listo». `
-              : outcome === 'closed' ? 'Todos los PBIs quedarán como «Terminado». ' : 'Los PBIs vuelven al Product Backlog como «Listo». '}
-            El Sprint no se borra: su historia queda en la bitácora.
+              ? `${pending.length} PBI${pending.length === 1 ? '' : 's'} sin terminar ${pending.length === 1 ? 'vuelve' : 'vuelven'} al Product Backlog como «Refinado» para que el Product Owner decida de nuevo. `
+              : outcome === 'closed' ? 'Todos los PBIs quedarán como «Terminado». ' : 'Los PBIs vuelven al Product Backlog como «Refinado» para una nueva decisión. '}
+            Se guardan los resultados, pendientes, acuerdos y métricas, y el informe queda disponible en Reportes.
           </p>
         </div>
         {error && <p className="form__error" role="alert">{error}</p>}
         <footer className="dialog__actions">
           <span style={{ flex: 1 }} />
           <button type="button" className="btn btn--ghost" onClick={onClose}>Volver</button>
-          <button className="btn btn--primary" disabled={busy || (outcome === 'cancelled' && !reason.trim())}>
+          <button className="btn btn--primary"
+            disabled={busy || (outcome === 'cancelled' && !reason.trim()) || (outcome === 'closed' && goalMet === null)}>
             {outcome === 'closed' ? 'Cerrar Sprint' : 'Cancelar Sprint'}
           </button>
         </footer>

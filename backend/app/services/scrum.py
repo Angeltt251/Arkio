@@ -14,7 +14,8 @@ from app.services.permissions import can_edit, can_manage
 def header(db: Session, project: Project, user_id: UUID) -> dict:
     return {
         "project_id": project.id, "project_name": project.name, "project_key": project.key,
-        "product_goal": project.product_goal, "can_edit": can_edit(db, project, user_id),
+        "product_goal": project.product_goal, "definition_of_done": project.definition_of_done or [],
+        "can_edit": can_edit(db, project, user_id),
         "can_manage": can_manage(db, project, user_id),
     }
 

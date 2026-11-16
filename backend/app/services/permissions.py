@@ -7,7 +7,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import Project, ProjectMember, Sprint, Workspace, WorkspaceMember
+from app.db.models import Profile, Project, ProjectMember, Sprint, Workspace, WorkspaceMember
 from app.schemas.workspace import ProjectOut, WorkspaceSettings
 
 ADMIN_ROLES = ("owner", "admin")
@@ -124,5 +124,7 @@ def project_outs(db: Session, projects: list[Project], user_id: UUID) -> list[Pr
         item.can_delete = is_admin and p.id not in with_sprints
         member = db.get(ProjectMember, (p.id, user_id))
         item.my_role = member.role if member else None
+        lead = db.get(Profile, p.lead_id) if p.lead_id else None
+        item.lead_name = (lead.full_name or lead.email) if lead else None
         out.append(item)
     return out

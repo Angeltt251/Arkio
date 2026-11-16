@@ -1,14 +1,18 @@
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, StringConstraints
 
 from app.schemas.common import CamelModel
 
 WorkspaceRoleName = Literal["owner", "admin", "member"]
 ProjectRoleName = Literal["product_owner", "scrum_master", "developer", "observer"]
 ProjectStatusName = Literal["planning", "active", "paused", "closed"]
+ProjectTypeName = Literal["software", "web", "mobile", "data", "research", "academic", "other"]
+
+# Definition of Done: criterios en texto que todo trabajo debe cumplir para darse por terminado
+DefinitionOfDone = list[Annotated[str, StringConstraints(strip_whitespace=True, min_length=2, max_length=200)]]
 
 
 NotificationKind = Literal["task_assigned", "task_update", "sprint", "membership", "retro_action"]
@@ -79,6 +83,7 @@ class NotificationsRead(CamelModel):
 
 class WorkspaceCreate(CamelModel):
     name: str = Field(min_length=2, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
 
 
 class WorkspaceSettings(CamelModel):
@@ -92,17 +97,21 @@ class WorkspaceSettings(CamelModel):
 class WorkspaceOut(CamelModel):
     id: UUID
     name: str
+    description: str | None = None
     role: WorkspaceRoleName
     created_at: datetime
     owner_id: UUID | None = None
+    owner_name: str | None = None
+    member_count: int = 0
     settings: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
 
 
 class ProjectCreate(CamelModel):
     name: str = Field(min_length=2, max_length=120)
     key: str = Field(pattern=r"^[A-Z][A-Z0-9]{1,5}$", description="Prefijo de los PBIs, ej: SAL")
-    description: str | None = None
-    product_goal: str | None = None
+    description: str | None = Field(default=None, max_length=500)
+    project_type: ProjectTypeName = "software"
+    lead_id: UUID | None = Field(default=None, description="Responsable del proyecto (miembro del espacio); por defecto, quien lo crea")
     color: str = Field(default="#447794", pattern=r"^#[0-9A-Fa-f]{6}$")
     my_role: ProjectRoleName = "product_owner"
     template: str = Field(default="scrum", description="Plantilla de columnas y tareas iniciales (GET /api/templates)")
@@ -115,6 +124,10 @@ class ProjectOut(CamelModel):
     name: str
     description: str | None
     product_goal: str | None
+    project_type: ProjectTypeName = "software"
+    lead_id: UUID | None = None
+    lead_name: str | None = None
+    definition_of_done: list[str] = []
     status: ProjectStatusName
     color: str
     created_at: datetime
@@ -130,10 +143,14 @@ class ProjectUpdate(CamelModel):
     color: str | None = Field(None, pattern=r"^#[0-9A-Fa-f]{6}$")
     status: ProjectStatusName | None = None
     product_goal: str | None = Field(None, max_length=1000)
+    project_type: ProjectTypeName | None = None
+    lead_id: UUID | None = None
+    definition_of_done: DefinitionOfDone | None = Field(None, max_length=20)
 
 
 class WorkspaceUpdate(CamelModel):
     name: str | None = Field(default=None, min_length=2, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
     settings: WorkspaceSettings | None = None
 
 

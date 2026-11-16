@@ -74,6 +74,21 @@ Arkio/
 - **Configuración**: perfil (nombre y foto), seguridad (cambiar contraseña confirmando la actual, cerrar sesión en otros dispositivos), apariencia (tema claro/oscuro/sistema guardado en el perfil, reducir animaciones, página de inicio), notificaciones (qué avisos llegan a la campana y cuáles también por correo), espacio de trabajo (nombre, si los miembros pueden crear proyectos, duración sugerida de Sprints y tablero inicial), proyecto (datos, Product Goal y etiquetas) y matriz de permisos por rol.
 - **Notificaciones**: campana con avisos personales al asignar tareas, terminar o bloquear una tarea tuya, iniciar/cerrar Sprints, asignar acciones de mejora, agregarte a un proyecto o cambiar tu rol. Cada aviso enlaza a lo que pasó.
 
+- **Ciclo del proyecto** (`/ciclo`): guía de 12 pasos con lo hecho, lo que falta y dónde hacerlo.
+  1. Espacio de trabajo: nombre del equipo, descripción, propietario y miembros (invitados al crearlo).
+  2. Proyecto: nombre, descripción, tipo y responsable.
+  3. Equipo: invitaciones y roles (Product Owner, Scrum Master, Developers, observadores).
+  4. **Product Goal**: el objetivo general del producto. Es obligatorio antes de crear PBIs.
+  5. Product Backlog: PBIs, historias, criterios de aceptación, prioridades y estimaciones.
+  6. **Definition of Done**: criterios de calidad del proyecto. Es obligatoria antes de la Sprint Planning.
+  7. Sprint Planning: duración, **Sprint Goal** (el resultado de *ese* Sprint, que no puede ser igual al Product Goal), PBIs seleccionados y su descomposición en tareas (una tarea por línea; cada una es una tarjeta en el tablero).
+  8. Iniciar el Sprint (tablero Kanban activo).
+  9. Seguimiento: Daily Scrum, impedimentos, tareas y bitácora.
+  10. Sprint Review y 11. Sprint Retrospective (actas en Eventos Scrum).
+  12. Cierre: el equipo indica si se cumplió el Sprint Goal. Se guarda un resumen (resultados, pendientes, acuerdos de la Review y la Retro, acciones de mejora y métricas) y el informe queda en Reportes. Lo incompleto vuelve al Product Backlog como «Refinado» y marcado «Volvió del Sprint #N», para que el Product Owner decida de nuevo.
+
+  Migración: `supabase/migrations/20261116000000_ciclo_de_vida.sql`.
+
 Las demás secciones del menú muestran una página que indica en qué iteración se construyen.
 
 ## Puesta en marcha

@@ -63,7 +63,10 @@ def set_product_goal(project_id: UUID, payload: ProductGoalUpdate, user: Current
 
 @router.post("/projects/{project_id}/backlog-items", response_model=PbiOut, status_code=status.HTTP_201_CREATED)
 def create_pbi(project_id: UUID, payload: PbiCreate, user: CurrentUser, db: UserDB) -> PbiOut:
-    project_access(db, project_id, user.id, write=True)
+    project = project_access(db, project_id, user.id, write=True)
+    if not project.product_goal:  # paso 4 antes del 5: el Product Goal orienta qué entra y en qué orden
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Define primero el Product Goal: orienta qué entra al Product Backlog y en qué orden")
     if payload.parent_id:
         parent = db.get(BacklogItem, payload.parent_id)
         if parent is None or parent.project_id != project_id:

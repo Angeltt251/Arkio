@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Icon } from '@/components/ui/Icon';
 import { useAuth } from '@/context/AuthContext';
 import { useEscape } from '@/hooks/useProjectResource';
 import { apiFetch } from '@/lib/api';
 import { PROJECT_STATUS_LABEL } from '@/lib/format';
-import { PROJECT_COLORS, suggestKey, type ProjectTemplate } from '@/lib/projects';
+import { PROJECT_COLORS, PROJECT_TYPE_LABEL, suggestKey, type ProjectTemplate, type ProjectType } from '@/lib/projects';
 import type { ProjectRole, ProjectStatus } from '@/types';
 
 interface Workspace {
   id: string;
   name: string;
+  description: string | null;
   role: 'owner' | 'admin' | 'member';
   createdAt: string;
+  ownerName: string | null;
+  memberCount: number;
   settings: { membersCanCreateProjects: boolean; defaultTemplate: string; defaultSprintWeeks: number };
 }
 
@@ -22,6 +25,9 @@ interface Project {
   key: string;
   name: string;
   description: string | null;
+  projectType: ProjectType;
+  leadId: string | null;
+  leadName: string | null;
   status: ProjectStatus;
   color: string;
   archivedAt: string | null;
@@ -56,12 +62,27 @@ const ROLE_LABEL: Record<ProjectRole, string> = {
   observer: 'Observador',
 };
 
+interface WorkspaceMember {
+  userId: string;
+  fullName: string;
+  email: string;
+  status: string;
+}
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Correos separados por coma, espacio o salto de línea. */
+function parseEmails(text: string): string[] {
+  return [...new Set(text.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean))];
+}
+
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
 }
 
 export function WorkspacesPage() {
-  const { token, isDemo } = useAuth();
+  const { token, isDemo, user } = useAuth();
+  const navigate = useNavigate();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -69,6 +90,9 @@ export function WorkspacesPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const [workspaceName, setWorkspaceName] = useState('');
+  const [workspaceDescription, setWorkspaceDescription] = useState('');
+  const [memberEmails, setMemberEmails] = useState('');
+  const [inviteResult, setInviteResult] = useState<string | null>(null);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
 
@@ -77,6 +101,9 @@ export function WorkspacesPage() {
   const [projectKey, setProjectKey] = useState('');
   const [keyTouched, setKeyTouched] = useState(false);
   const [description, setDescription] = useState('');
+  const [projectType, setProjectType] = useState<ProjectType>('software');
+  const [leadId, setLeadId] = useState('');
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [color, setColor] = useState(PROJECT_COLORS[0]);
   const [myRole, setMyRole] = useState<ProjectRole>('product_owner');
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
@@ -127,18 +154,50 @@ export function WorkspacesPage() {
     void loadProjects();
   }, [loadProjects]);
 
+  // Candidatos a responsable del proyecto: miembros activos del espacio
+  useEffect(() => {
+    if (!token || !selectedId) return setMembers([]);
+    apiFetch<WorkspaceMember[]>(`/api/workspaces/${selectedId}/members`, token)
+      .then((list) => setMembers(list.filter((m) => m.status === 'active')))
+      .catch(() => setMembers([]));
+  }, [token, selectedId]);
+
   const createWorkspace = async (e: FormEvent) => {
     e.preventDefault();
     setWorkspaceError(null);
+    setInviteResult(null);
+    const emails = parseEmails(memberEmails);
+    if (emails.some((m) => !EMAIL.test(m))) {
+      setWorkspaceError(`Revisa estos correos: ${emails.filter((m) => !EMAIL.test(m)).join(', ')}`);
+      return;
+    }
     setCreatingWorkspace(true);
     try {
       const ws = await apiFetch<Workspace>('/api/workspaces', token, {
         method: 'POST',
-        body: JSON.stringify({ name: workspaceName.trim() }),
+        body: JSON.stringify({ name: workspaceName.trim(), description: workspaceDescription.trim() || null }),
       });
+      // Miembros: cada correo recibe una invitación al espacio (los roles Scrum se asignan en cada proyecto)
+      const failed: string[] = [];
+      for (const email of emails) {
+        try {
+          await apiFetch(`/api/workspaces/${ws.id}/invitations`, token, {
+            method: 'POST', body: JSON.stringify({ email, workspaceRole: 'member' }),
+          });
+        } catch (err) {
+          failed.push(`${email} (${errorMessage(err, 'error')})`);
+        }
+      }
+      if (emails.length) {
+        const sent = emails.length - failed.length;
+        setInviteResult(`${sent} ${sent === 1 ? 'invitación enviada' : 'invitaciones enviadas'}.` +
+          (failed.length ? ` No se pudo invitar a: ${failed.join(', ')}.` : ' Puedes seguirlas en Miembros.'));
+      }
       setWorkspaces((list) => [...list, ws]);
       setSelectedId(ws.id);
       setWorkspaceName('');
+      setWorkspaceDescription('');
+      setMemberEmails('');
       setShowProjectForm(true);
     } catch (err) {
       setWorkspaceError(errorMessage(err, 'No se pudo crear el espacio.'));
@@ -152,6 +211,8 @@ export function WorkspacesPage() {
     setProjectKey('');
     setKeyTouched(false);
     setDescription('');
+    setProjectType('software');
+    setLeadId('');
     setColor(PROJECT_COLORS[0]);
     setMyRole('product_owner');
     setTemplate(selected?.settings.defaultTemplate ?? 'scrum');
@@ -170,6 +231,8 @@ export function WorkspacesPage() {
           name: projectName.trim(),
           key: projectKey,
           description: description.trim() || null,
+          projectType,
+          leadId: leadId || null,
           color,
           myRole,
           template,
@@ -179,6 +242,8 @@ export function WorkspacesPage() {
       setView('active');
       resetProjectForm();
       setShowProjectForm(false);
+      // Siguiente paso del ciclo: configurar el equipo y definir el Product Goal
+      navigate(`/ciclo?proyecto=${project.id}`);
     } catch (err) {
       setProjectError(errorMessage(err, 'No se pudo crear el proyecto.'));
     } finally {
@@ -235,7 +300,7 @@ export function WorkspacesPage() {
       <div className="page-head">
         <div>
           <h1>Espacios de trabajo</h1>
-          <p className="muted">Crea un espacio y organiza tus proyectos dentro de él.</p>
+          <p className="muted">Paso 1: crea el espacio del equipo. Paso 2: crea sus proyectos.</p>
         </div>
         {selected && canCreate && !showProjectForm && (
           <button className="btn btn--primary" onClick={() => { resetProjectForm(); setShowProjectForm(true); }}>
@@ -245,6 +310,7 @@ export function WorkspacesPage() {
       </div>
 
       {(loadError || actionError) && <p className="form__error" role="alert">{actionError ?? loadError}</p>}
+      {inviteResult && <p className="notice notice--compact" role="status">{inviteResult}</p>}
 
       {loading ? (
         <div className="skeleton" aria-busy="true" aria-label="Cargando espacios" />
@@ -296,12 +362,35 @@ export function WorkspacesPage() {
                 </label>
 
                 <label className="field">
-                  <span>Descripción (opcional)</span>
+                  <span>Descripción</span>
                   <div className="input">
                     <input maxLength={500} placeholder="¿De qué trata el proyecto?" value={description}
                       onChange={(e) => setDescription(e.target.value)} />
                   </div>
                 </label>
+
+                <div className="dialog__row">
+                  <label className="field">
+                    <span>Tipo de proyecto</span>
+                    <select className="select" value={projectType} onChange={(e) => setProjectType(e.target.value as ProjectType)}>
+                      {Object.entries(PROJECT_TYPE_LABEL).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>Responsable</span>
+                    <select className="select" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
+                      <option value="">Yo{user?.fullName ? ` (${user.fullName})` : ''}</option>
+                      {members.filter((m) => m.userId !== user?.id).map((m) => (
+                        <option key={m.userId} value={m.userId}>{m.fullName || m.email}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <p className="muted small" style={{ margin: 0 }}>
+                  El Product Goal se define después (paso 4), antes de crear el Product Backlog.
+                </p>
 
                 <div className="field">
                   <span>Color</span>
@@ -348,7 +437,7 @@ export function WorkspacesPage() {
                     Cancelar
                   </button>
                   <button className="btn btn--primary"
-                    disabled={creatingProject || projectName.trim().length < 2 || !keyValid}>
+                    disabled={creatingProject || projectName.trim().length < 2 || !keyValid || !description.trim()}>
                     {creatingProject ? 'Creando…' : 'Crear proyecto'}
                   </button>
                 </div>
@@ -422,10 +511,17 @@ export function WorkspacesPage() {
                 ))}
               </ul>
             )}
+            {selected && (
+              <div className="muted small">
+                {selected.description && <p style={{ margin: '0.6rem 0 0.2rem' }}>{selected.description}</p>}
+                Propietario: {selected.ownerName ?? '—'} · {selected.memberCount} {selected.memberCount === 1 ? 'miembro' : 'miembros'}{' '}
+                · <Link to="/miembros">Gestionar miembros</Link>
+              </div>
+            )}
             {selected && selected.role !== 'member' && (
               <div className="workspace-actions">
                 <button type="button" className="btn btn--ghost btn--sm" onClick={() => setWorkspaceDialog('rename')}>
-                  <Icon name="edit" size={15} /> Renombrar
+                  <Icon name="edit" size={15} /> Editar
                 </button>
                 {selected.role === 'owner' && (
                   <button type="button" className="btn btn--ghost btn--sm btn--danger" onClick={() => setWorkspaceDialog('delete')}>
@@ -436,13 +532,30 @@ export function WorkspacesPage() {
             )}
             <form className="form" onSubmit={createWorkspace} noValidate>
               <label className="field">
-                <span>{workspaces.length ? 'Nuevo espacio' : 'Crea tu primer espacio'}</span>
+                <span>{workspaces.length ? 'Nuevo espacio: nombre del equipo' : 'Crea tu primer espacio: nombre del equipo'}</span>
                 <div className="input">
                   <Icon name="workspaces" size={18} />
                   <input required minLength={2} maxLength={80} placeholder="Ej: Taller de Proyectos 2026"
                     value={workspaceName} onChange={(e) => setWorkspaceName(e.target.value)} />
                 </div>
               </label>
+              {workspaceName.trim().length >= 2 && (
+                <>
+                  <label className="field">
+                    <span>Descripción</span>
+                    <textarea className="textarea" rows={2} maxLength={500} value={workspaceDescription}
+                      placeholder="¿Qué equipo es y en qué trabaja?" onChange={(e) => setWorkspaceDescription(e.target.value)} />
+                  </label>
+                  <p className="muted small" style={{ margin: 0 }}>
+                    Propietario: {user?.fullName || user?.email || 'tú'} (quien crea el espacio)
+                  </p>
+                  <label className="field">
+                    <span className="field__row">Miembros <span className="muted small">Opcional · correos separados por coma</span></span>
+                    <textarea className="textarea" rows={2} value={memberEmails}
+                      placeholder="ana@correo.cl, luis@correo.cl" onChange={(e) => setMemberEmails(e.target.value)} />
+                  </label>
+                </>
+              )}
               {workspaceError && <p className="form__error" role="alert">{workspaceError}</p>}
               <button className="btn btn--ghost btn--block"
                 disabled={creatingWorkspace || workspaceName.trim().length < 2}>
@@ -454,7 +567,7 @@ export function WorkspacesPage() {
       )}
 
       {editing && (
-        <EditProjectDialog project={editing} token={token} onClose={() => setEditing(null)}
+        <EditProjectDialog project={editing} members={members} token={token} onClose={() => setEditing(null)}
           onSaved={(p) => { replaceProject(p); setEditing(null); }} />
       )}
       {deleting && (
@@ -516,14 +629,17 @@ function ProjectCard({ project: p, busy, onEdit, onComplete, onReopen, onArchive
         </span>
         <div>
           {view === 'archived' ? <h3>{p.name}</h3> : (
-            <h3><Link to={`/tableros?proyecto=${p.id}`} className="project-card__link">{p.name}</Link></h3>
+            <h3><Link to={`/ciclo?proyecto=${p.id}`} className="project-card__link">{p.name}</Link></h3>
           )}
           <span className={`pill pill--${p.status}`}>
             {view === 'archived' ? 'Archivado' : p.status === 'closed' ? 'Completado' : PROJECT_STATUS_LABEL[p.status]}
           </span>
         </div>
       </header>
-      <p className="muted small">{p.key}{p.description ? ` · ${p.description}` : ''}</p>
+      <p className="muted small">
+        {p.key} · {PROJECT_TYPE_LABEL[p.projectType] ?? 'Otro'}{p.leadName ? ` · Responsable: ${p.leadName}` : ''}
+        {p.description ? <><br />{p.description}</> : null}
+      </p>
 
       {(p.canManage || p.canDelete) && (
         <footer className="project-card__actions">
@@ -566,8 +682,9 @@ function ProjectCard({ project: p, busy, onEdit, onComplete, onReopen, onArchive
   );
 }
 
-function EditProjectDialog({ project, token, onClose, onSaved }: {
+function EditProjectDialog({ project, members, token, onClose, onSaved }: {
   project: Project;
+  members: WorkspaceMember[];
   token: string | null;
   onClose: () => void;
   onSaved: (project: Project) => void;
@@ -576,6 +693,8 @@ function EditProjectDialog({ project, token, onClose, onSaved }: {
   const [description, setDescription] = useState(project.description ?? '');
   const [color, setColor] = useState(project.color);
   const [status, setStatus] = useState<ProjectStatus>(project.status);
+  const [projectType, setProjectType] = useState<ProjectType>(project.projectType);
+  const [leadId, setLeadId] = useState(project.leadId ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEscape(onClose);
@@ -587,7 +706,10 @@ function EditProjectDialog({ project, token, onClose, onSaved }: {
     try {
       onSaved(await apiFetch<Project>(`/api/projects/${project.id}`, token, {
         method: 'PATCH',
-        body: JSON.stringify({ name: name.trim(), description: description.trim() || null, color, status }),
+        body: JSON.stringify({
+          name: name.trim(), description: description.trim() || null, color, status, projectType,
+          ...(leadId ? { leadId } : {}),
+        }),
       }));
     } catch (err) {
       setError(errorMessage(err, 'No se pudo guardar el proyecto.'));
@@ -617,6 +739,21 @@ function EditProjectDialog({ project, token, onClose, onSaved }: {
               <input maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
             </div>
           </label>
+          <div className="dialog__row">
+            <label className="field">
+              <span>Tipo de proyecto</span>
+              <select className="select" value={projectType} onChange={(e) => setProjectType(e.target.value as ProjectType)}>
+                {Object.entries(PROJECT_TYPE_LABEL).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="field">
+              <span>Responsable</span>
+              <select className="select" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
+                {!leadId && <option value="">Sin responsable</option>}
+                {members.map((m) => <option key={m.userId} value={m.userId}>{m.fullName || m.email}</option>)}
+              </select>
+            </label>
+          </div>
           <label className="field">
             <span>Estado</span>
             <select className="select" value={status} onChange={(e) => setStatus(e.target.value as ProjectStatus)}>
@@ -655,6 +792,7 @@ function RenameWorkspaceDialog({ workspace, token, onClose, onSaved }: {
   onSaved: (workspace: Workspace) => void;
 }) {
   const [name, setName] = useState(workspace.name);
+  const [description, setDescription] = useState(workspace.description ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEscape(onClose);
@@ -665,19 +803,19 @@ function RenameWorkspaceDialog({ workspace, token, onClose, onSaved }: {
     setError(null);
     try {
       onSaved(await apiFetch<Workspace>(`/api/workspaces/${workspace.id}`, token, {
-        method: 'PATCH', body: JSON.stringify({ name: name.trim() }),
+        method: 'PATCH', body: JSON.stringify({ name: name.trim(), description: description.trim() || null }),
       }));
     } catch (err) {
-      setError(errorMessage(err, 'No se pudo renombrar el espacio.'));
+      setError(errorMessage(err, 'No se pudo guardar el espacio.'));
       setBusy(false);
     }
   };
 
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <form className="dialog card" onSubmit={submit} role="dialog" aria-modal="true" aria-label="Renombrar espacio">
+      <form className="dialog card" onSubmit={submit} role="dialog" aria-modal="true" aria-label="Editar espacio">
         <header className="card__head">
-          <h2><Icon name="workspaces" size={20} className="card__icon" /> Renombrar espacio</h2>
+          <h2><Icon name="workspaces" size={20} className="card__icon" /> Editar espacio</h2>
           <button type="button" className="icon-btn" aria-label="Cerrar" onClick={onClose}>
             <Icon name="close" size={18} />
           </button>
@@ -687,6 +825,10 @@ function RenameWorkspaceDialog({ workspace, token, onClose, onSaved }: {
           <div className="input">
             <input autoFocus required minLength={2} maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
           </div>
+        </label>
+        <label className="field">
+          <span>Descripción</span>
+          <textarea className="textarea" rows={3} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
         </label>
         {error && <p className="form__error" role="alert">{error}</p>}
         <footer className="dialog__actions">

@@ -15,12 +15,13 @@ import { EventsPage } from '@/pages/EventsPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { SprintsPage } from '@/pages/SprintsPage';
+import { LifecyclePage } from '@/pages/LifecyclePage';
 import { LogbookPage } from '@/pages/LogbookPage';
 import { MembersPage } from '@/pages/MembersPage';
 import { WorkspacesPage } from '@/pages/WorkspacesPage';
 import { ProtectedRoute } from '@/routes/ProtectedRoute';
 
-const BUILT_PAGES = ['/', '/espacios', '/tableros', '/miembros', '/bitacora', '/backlog', '/sprints', '/eventos', '/reportes', '/configuracion'];
+const BUILT_PAGES = ['/', '/ciclo', '/espacios', '/tableros', '/miembros', '/bitacora', '/backlog', '/sprints', '/eventos', '/reportes', '/configuracion'];
 
 export default function App() {
   return (
@@ -37,6 +38,7 @@ export default function App() {
               <Route element={<AppLayout />}>
                 <Route index element={<DashboardPage />} />
                 <Route path="/espacios" element={<WorkspacesPage />} />
+                <Route path="/ciclo" element={<LifecyclePage />} />
                 <Route path="/tableros" element={<BoardsPage />} />
                 <Route path="/miembros" element={<MembersPage />} />
                 <Route path="/bitacora" element={<LogbookPage />} />

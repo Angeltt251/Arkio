@@ -59,7 +59,7 @@ export function Sidebar({ open, onNavigate }: SidebarProps) {
   }, [inProject, fromUrl, current, pathname, navigate]);
 
   const chooseProject = (id: string) => {
-    navigate(`${inProject ? pathname : '/tableros'}?proyecto=${id}`);
+    navigate(`${inProject ? pathname : '/ciclo'}?proyecto=${id}`);
     onNavigate();
   };
 

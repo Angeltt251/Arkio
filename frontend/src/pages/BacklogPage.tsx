@@ -9,6 +9,7 @@ import {
   PBI_STATUS_LABEL,
   PBI_TYPE_LABEL,
   PRIORITY_LABEL,
+  isReturned,
   type Pbi,
   type PbiStatus,
   type PbiType,
@@ -46,6 +47,7 @@ export function BacklogPage() {
   }, [backlog, filter, query]);
 
   const canReorder = !!backlog?.canEdit && filter !== 'all' && !query.trim();
+  const returned = (backlog?.items ?? []).filter((i) => !i.archived && isReturned(i));
   const points = visible.filter((i) => !i.archived).reduce((sum, i) => sum + (i.estimate ?? 0), 0);
 
   const saveGoal = async (e: FormEvent) => {
@@ -153,6 +155,7 @@ export function BacklogPage() {
           <section className="card goal-card">
             <header className="card__head">
               <h2><Icon name="target" size={20} className="card__icon" /> Product Goal</h2>
+              <span className="muted small">Paso 4 · se define antes de crear el backlog</span>
               {backlog.canManage && !editingGoal && (
                 <button type="button" className="btn btn--ghost btn--sm"
                   onClick={() => { setGoal(backlog.productGoal ?? ''); setEditingGoal(true); }}>
@@ -174,11 +177,20 @@ export function BacklogPage() {
               <p className="goal-card__text">{backlog.productGoal}</p>
             ) : (
               <p className="muted small">
-                Aún no hay Product Goal. {backlog.canManage ? 'Defínelo para orientar el backlog.' : 'Lo define el Product Owner.'}
+                Aún no hay Product Goal. Es el objetivo general del producto y orienta qué entra al backlog y en qué orden.{' '}
+                {backlog.canManage ? 'Defínelo para poder crear PBIs.' : 'Lo define el Product Owner; hasta entonces no se pueden crear PBIs.'}
               </p>
             )}
           </section>
 
+          <DefinitionOfDoneCard backlog={backlog} projectId={projectId} token={token} onSaved={reload} onError={setError} />
+
+          {returned.length > 0 && (
+            <p className="notice notice--compact" role="status">
+              {returned.length === 1 ? '1 PBI volvió' : `${returned.length} PBIs volvieron`} de un Sprint sin terminar
+              ({returned.map((i) => i.code).join(', ')}). El Product Owner decide si siguen, cambian de orden o se descartan.
+            </p>
+          )}
           <div className="backlog-toolbar">
             <div className="search backlog-toolbar__search">
               <Icon name="search" size={17} />
@@ -200,7 +212,8 @@ export function BacklogPage() {
               {visible.length} {visible.length === 1 ? 'elemento' : 'elementos'} · {points} pts
             </span>
             {backlog.canEdit && (
-              <button type="button" className="btn btn--primary btn--sm" onClick={() => setEditing('new')}>
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => setEditing('new')}
+                disabled={!backlog.productGoal} title={backlog.productGoal ? undefined : 'Primero define el Product Goal'}>
                 <Icon name="plus" size={16} /> Nuevo PBI
               </button>
             )}
@@ -210,7 +223,11 @@ export function BacklogPage() {
             <div className="empty card">
               <p>{backlog.items.length ? 'Ningún elemento coincide con el filtro.' : 'El Product Backlog está vacío.'}</p>
               {backlog.canEdit && !backlog.items.length && (
-                <p className="muted small">Crea el primer PBI: una historia de usuario, un defecto o una mejora.</p>
+                <p className="muted small">
+                  {backlog.productGoal
+                    ? 'Crea el primer PBI: una historia de usuario, un defecto o una mejora.'
+                    : 'Primero define el Product Goal; después crea y ordena los PBIs.'}
+                </p>
               )}
             </div>
           ) : (
@@ -253,7 +270,11 @@ export function BacklogPage() {
                         <span className="pill pill--closed">{PBI_TYPE_LABEL[item.type]}</span>
                         <span className={`priority priority--${item.priority}`}>{PRIORITY_LABEL[item.priority]}</span>
                         <span className={`pill pbi-status pbi-status--${item.status}`}>{PBI_STATUS_LABEL[item.status]}</span>
-                        {item.sprintNumber && <span className="muted small">Sprint #{item.sprintNumber}</span>}
+                        {isReturned(item) ? (
+                          <span className="pill pill--returned" title="Volvió sin terminar: requiere una nueva decisión">
+                            Volvió del Sprint #{item.sprintNumber}
+                          </span>
+                        ) : item.sprintNumber && <span className="muted small">Sprint #{item.sprintNumber}</span>}
                         {item.taskCount > 0 && (
                           <span className="muted small" title="Tareas terminadas en el tablero">
                             <Icon name="check" size={13} /> {item.tasksDone}/{item.taskCount}
@@ -279,6 +300,105 @@ export function BacklogPage() {
           onSaved={() => { setEditing(null); void reload(); }} />
       )}
     </div>
+  );
+}
+
+// ------------------------------------------------------------ Definition of Done
+function DefinitionOfDoneCard({ backlog, projectId, token, onSaved, onError }: {
+  backlog: Backlog;
+  projectId: string | null;
+  token: string | null;
+  onSaved: () => Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [criteria, setCriteria] = useState<string[]>([]);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const dod = backlog.definitionOfDone;
+
+  const add = () => {
+    const text = draft.trim();
+    if (text.length >= 2 && !criteria.includes(text)) setCriteria((c) => [...c, text]);
+    setDraft('');
+  };
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!projectId) return;
+    const pending = draft.trim();
+    const list = pending.length >= 2 && !criteria.includes(pending) ? [...criteria, pending] : criteria;
+    setBusy(true);
+    try {
+      await apiFetch(`/api/projects/${projectId}`, token, {
+        method: 'PATCH', body: JSON.stringify({ definitionOfDone: list }),
+      });
+      setEditing(false);
+      setDraft('');
+      await onSaved();
+    } catch (err) {
+      onError(errorMessage(err, 'No se pudo guardar la Definition of Done.'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="card goal-card" id="dod">
+      <header className="card__head">
+        <h2><Icon name="check" size={20} className="card__icon" /> Definition of Done</h2>
+        <span className="muted small">Paso 6 · obligatoria antes de la Sprint Planning</span>
+        {backlog.canManage && !editing && (
+          <button type="button" className="btn btn--ghost btn--sm" onClick={() => { setCriteria(dod); setEditing(true); }}>
+            {dod.length ? 'Editar' : 'Definir'}
+          </button>
+        )}
+      </header>
+      {editing ? (
+        <form className="form" onSubmit={save} style={{ marginTop: 0 }}>
+          {criteria.length > 0 && (
+            <ul className="dod-list">
+              {criteria.map((c, i) => (
+                <li key={c}>
+                  <Icon name="check" size={15} />
+                  <span style={{ flex: 1 }}>{c}</span>
+                  <button type="button" className="icon-btn icon-btn--sm" aria-label={`Quitar «${c}»`}
+                    onClick={() => setCriteria((list) => list.filter((_, j) => j !== i))}>
+                    <Icon name="close" size={14} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="dod-edit">
+            <div className="input">
+              <input autoFocus maxLength={200} value={draft} aria-label="Nuevo criterio"
+                placeholder="Ej: El código está revisado por otro integrante"
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+            </div>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={add} disabled={draft.trim().length < 2}>
+              <Icon name="plus" size={15} /> Agregar
+            </button>
+          </div>
+          <div className="board-add__actions">
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => setEditing(false)}>Cancelar</button>
+            <button className="btn btn--primary btn--sm" disabled={busy || criteria.length + (draft.trim().length >= 2 ? 1 : 0) === 0}>
+              {busy ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </form>
+      ) : dod.length ? (
+        <ul className="dod-list">
+          {dod.map((c) => <li key={c}><Icon name="check" size={15} /> {c}</li>)}
+        </ul>
+      ) : (
+        <p className="muted small">
+          Aún no está definida. Indica cuándo un trabajo se considera terminado y cumple los estándares de calidad
+          (pruebas, revisión, documentación…). {backlog.canManage ? '' : 'La define el Product Owner o el Scrum Master.'}
+        </p>
+      )}
+    </section>
   );
 }
 

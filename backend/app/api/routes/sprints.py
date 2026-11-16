@@ -18,13 +18,22 @@ from app.db.models import (
     EventAttendee,
     Project,
     ProjectMember,
+    RetroAction,
     ScrumEvent,
     Sprint,
     SprintItem,
     Task,
     Workspace,
 )
-from app.schemas.scrum import SprintClose, SprintCreate, SprintOut, SprintPbi, SprintsOut, SprintUpdate
+from app.schemas.scrum import (
+    SprintClose,
+    SprintCreate,
+    SprintOut,
+    SprintPbi,
+    SprintsOut,
+    SprintSummary,
+    SprintUpdate,
+)
 from app.services.notifications import actor_name, notify, project_member_ids
 from app.services.permissions import project_access, require_project_manager, workspace_settings
 from app.services.scrum import header, pbi_outs, project_members, task_progress
@@ -42,6 +51,11 @@ def _check_dates(start, end) -> None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Un Sprint dura un mes o menos")
 
 
+def _same_text(a: str | None, b: str | None) -> bool:
+    norm = lambda t: " ".join((t or "").lower().split()).rstrip(".")  # noqa: E731
+    return bool(a and b) and norm(a) == norm(b)
+
+
 def _active_sprint(db: Session, project_id: UUID) -> Sprint | None:
     return db.scalar(select(Sprint).where(Sprint.project_id == project_id, Sprint.status == "active"))
 
@@ -56,6 +70,7 @@ def _sprint_out(db: Session, sprint: Sprint) -> SprintOut:
         select(func.count(), func.count(Task.completed_at))
         .where(Task.sprint_id == sprint.id, Task.archived_at.is_(None))
     ).one()
+    held = set(db.scalars(select(ScrumEvent.type).where(ScrumEvent.sprint_id == sprint.id)))
     return SprintOut(
         id=sprint.id, number=sprint.number, goal=sprint.goal, start_date=sprint.start_date,
         end_date=sprint.end_date, status=sprint.status, close_reason=sprint.close_reason, closed_at=sprint.closed_at,
@@ -66,7 +81,9 @@ def _sprint_out(db: Session, sprint: Sprint) -> SprintOut:
         ],
         points_total=sum(float(i.estimate or 0) for i in items),
         points_done=sum(float(i.estimate or 0) for i in items if i.status == "done"),
-        task_count=total, tasks_done=done,
+        task_count=total, tasks_done=done, has_review="sprint_review" in held,
+        has_retro="sprint_retrospective" in held,
+        summary=SprintSummary.model_validate(sprint.summary) if sprint.summary else None,
     )
 
 
@@ -112,6 +129,15 @@ def list_sprints(project_id: UUID, user: CurrentUser, db: UserDB) -> SprintsOut:
 def plan_sprint(project_id: UUID, payload: SprintCreate, user: CurrentUser, db: UserDB) -> SprintOut:
     """Confirma la Sprint Planning: crea el Sprint numerado, su Sprint Backlog y el acta de la Planning."""
     project: Project = project_access(db, project_id, user.id, write=True)
+    # Orden del ciclo: Product Goal (paso 4) y Definition of Done (paso 6) antes de la Planning (paso 7)
+    if not project.product_goal:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Define primero el Product Goal del proyecto")
+    if not project.definition_of_done:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "Define primero la Definition of Done: sin ella no se sabe cuándo algo está terminado")
+    if _same_text(payload.goal, project.product_goal):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "El Sprint Goal no es el Product Goal: describe el resultado concreto de este Sprint")
     _check_dates(payload.start_date, payload.end_date)
     if payload.start_now and (active := _active_sprint(db, project_id)):
         raise HTTPException(status.HTTP_409_CONFLICT,
@@ -156,11 +182,14 @@ def plan_sprint(project_id: UUID, payload: SprintCreate, user: CurrentUser, db: 
         for task in pending:
             task.sprint_id = sprint.id
         if not pending and payload.create_tasks and first_column:
-            position += 1
-            db.add(Task(
-                project_id=project_id, column_id=first_column.id, sprint_id=sprint.id, backlog_item_id=item.id,
-                title=item.title, priority=item.priority, position=position, created_by=user.id,
-            ))
+            # Descomposición del PBI en tareas; sin tareas indicadas, una tarjeta con el título del PBI
+            titles = [t for t in payload.tasks.get(item.id, []) if len(t) >= 2] or [item.title]
+            for title in titles:
+                position += 1
+                db.add(Task(
+                    project_id=project_id, column_id=first_column.id, sprint_id=sprint.id, backlog_item_id=item.id,
+                    title=title, priority=item.priority, position=position, created_by=user.id,
+                ))
 
     codes = ", ".join(i.code for i in items)
     planning = ScrumEvent(
@@ -233,16 +262,22 @@ def close_sprint(sprint_id: UUID, payload: SprintClose, user: CurrentUser, db: U
         .where(SprintItem.sprint_id == sprint.id)
     ))
     progress = task_progress(db, [i.id for i in items], sprint.id)
+    finished_items, returned_items = [], []
     for item in items:
         if item.status != "in_sprint":
             continue
         total, done = progress.get(item.id, (0, 0))
         finished = payload.outcome == "closed" and total > 0 and done == total
-        item.status = "done" if finished else "ready"
+        # Lo incompleto vuelve al Product Backlog como «Refinado»: el Product Owner decide de nuevo
+        # si sigue, se reordena o se descarta (no pasa solo al próximo Sprint)
+        item.status = "done" if finished else "refined"
+        (finished_items if finished else returned_items).append(item)
 
     sprint.status = payload.outcome
     sprint.close_reason = reason
     sprint.closed_at = datetime.now(timezone.utc)
+    sprint.summary = _summary(db, sprint, finished_items, returned_items,
+                              payload.goal_met if payload.outcome == "closed" else False).model_dump()
     project = db.get(Project, sprint.project_id)
     verb = "se canceló" if payload.outcome == "cancelled" else "se cerró"
     notify(db, project_member_ids(db, project.id), actor_id=user.id, kind="sprint", project_id=project.id,
@@ -252,3 +287,28 @@ def close_sprint(sprint_id: UUID, payload: SprintClose, user: CurrentUser, db: U
     db.commit()
     db.refresh(sprint)
     return _sprint_out(db, sprint)
+
+
+def _summary(db: Session, sprint: Sprint, finished: list[BacklogItem], returned: list[BacklogItem],
+             goal_met: bool | None) -> SprintSummary:
+    """Foto del Sprint al cerrarlo: resultados, pendientes, acuerdos y métricas."""
+    tasks = list(db.scalars(select(Task).where(Task.sprint_id == sprint.id, Task.archived_at.is_(None))))
+    events = list(db.scalars(select(ScrumEvent).where(ScrumEvent.sprint_id == sprint.id).order_by(ScrumEvent.held_at)))
+    agreements = [
+        line.strip(" -•\t")
+        for e in events if e.type in ("sprint_review", "sprint_retrospective") and e.agreements
+        for line in e.agreements.splitlines() if line.strip(" -•\t")
+    ]
+    actions = list(db.scalars(
+        select(RetroAction.description).where(RetroAction.event_id.in_([e.id for e in events]))
+    )) if events else []
+    label = lambda i: f"{i.code} · {i.title}"  # noqa: E731
+    return SprintSummary(
+        goal_met=goal_met, done=[label(i) for i in finished], returned=[label(i) for i in returned],
+        agreements=agreements, improvement_actions=actions,
+        points_committed=sum(float(i.estimate or 0) for i in finished + returned),
+        points_done=sum(float(i.estimate or 0) for i in finished),
+        tasks_total=len(tasks), tasks_done=sum(1 for t in tasks if t.completed_at),
+        blocked_tasks=sum(1 for t in tasks if t.is_blocked and not t.completed_at),
+        daily_count=sum(1 for e in events if e.type == "daily_scrum"),
+    )
