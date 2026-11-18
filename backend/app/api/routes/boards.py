@@ -43,6 +43,7 @@ from app.schemas.board import (
     TaskCreate,
     TaskMove,
     TaskOut,
+    TasksToSprint,
     TaskUpdate,
 )
 from app.services.notifications import actor_name, notify
@@ -193,9 +194,13 @@ def _board(db: Session, project: Project, user_id: UUID, sprint: Sprint | None =
     ).scalars()
     # Un Sprint cerrado o cancelado es historia: su tablero queda de solo lectura
     open_sprint = sprint is None or sprint.status in ("planned", "active")
+    editable = open_sprint and can_edit(db, project, user_id)
+    loose: list[Task] = []
+    if sprint and editable:
+        loose = list(db.scalars(_loose_tasks(project.id).order_by(Task.created_at)))
     return BoardOut(
         project_id=project.id, project_name=project.name, project_key=project.key, project_color=project.color,
-        can_edit=open_sprint and can_edit(db, project, user_id),
+        can_edit=editable,
         can_manage_columns=open_sprint and can_manage(db, project, user_id),
         columns=[
             ColumnOut(id=c.id, name=c.name, position=c.position, wip_limit=c.wip_limit, is_done=c.is_done,
@@ -206,6 +211,15 @@ def _board(db: Session, project: Project, user_id: UUID, sprint: Sprint | None =
         labels=[LabelOut(id=lb.id, name=lb.name, color=lb.color) for lb in _labels(db, project.id)],
         sprint=BoardSprint(id=sprint.id, number=sprint.number, goal=sprint.goal, start_date=sprint.start_date,
                            end_date=sprint.end_date, status=sprint.status) if sprint else None,
+        loose_tasks=_task_outs(db, loose),
+    )
+
+
+def _loose_tasks(project_id: UUID):
+    """Tareas pendientes del proyecto que no pertenecen a ningún Sprint."""
+    return select(Task).where(
+        Task.project_id == project_id, Task.sprint_id.is_(None), Task.archived_at.is_(None),
+        Task.completed_at.is_(None),
     )
 
 
@@ -221,6 +235,25 @@ def get_sprint_board(sprint_id: UUID, user: CurrentUser, db: UserDB) -> BoardOut
     if sprint is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sprint no encontrado")
     return _board(db, project_access(db, sprint.project_id, user.id), user.id, sprint)
+
+
+@router.post("/sprints/{sprint_id}/tasks", response_model=list[TaskOut])
+def add_tasks_to_sprint(sprint_id: UUID, payload: TasksToSprint, user: CurrentUser, db: UserDB) -> list[TaskOut]:
+    """Pasa tareas sueltas (sin Sprint) al Sprint; conservan su columna."""
+    sprint = db.get(Sprint, sprint_id)
+    if sprint is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Sprint no encontrado")
+    project_access(db, sprint.project_id, user.id, write=True)
+    if sprint.status not in ("planned", "active"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "El Sprint ya terminó: no se le agregan tareas")
+    wanted = set(payload.task_ids)
+    tasks = list(db.scalars(_loose_tasks(sprint.project_id).where(Task.id.in_(wanted))))
+    if len(tasks) != len(wanted):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Alguna tarea no existe o ya está en un Sprint")
+    for task in tasks:
+        task.sprint_id = sprint.id
+    db.commit()
+    return _task_outs(db, tasks)
 
 
 @router.post("/projects/{project_id}/tasks", response_model=TaskOut, status_code=status.HTTP_201_CREATED)

@@ -72,6 +72,8 @@ class BoardOut(CamelModel):
     members: list[BoardMember]
     labels: list[LabelOut] = []
     sprint: BoardSprint | None = None
+    # Tareas pendientes que no están en ningún Sprint (solo en el tablero de un Sprint abierto)
+    loose_tasks: list[TaskOut] = []
 
 
 class TaskCreate(CamelModel):
@@ -96,6 +98,10 @@ class TaskUpdate(CamelModel):
     assignee_ids: list[UUID] | None = None
     label_ids: list[UUID] | None = None
     backlog_item_id: UUID | None = None
+
+
+class TasksToSprint(CamelModel):
+    task_ids: list[UUID] = Field(min_length=1)
 
 
 class TaskMove(CamelModel):

@@ -79,6 +79,7 @@ interface Board {
   members: Member[];
   labels: Label[];
   sprint: BoardSprint | null;
+  looseTasks: Task[];
 }
 
 const LABEL_COLORS = ['#447794', '#22A06B', '#F08A24', '#E5487D', '#2F80ED', '#8B5CF6', '#64748B'];
@@ -144,6 +145,7 @@ export function BoardsPage() {
   const [addingColumn, setAddingColumn] = useState(false);
   const [newColumnName, setNewColumnName] = useState('');
   const [editing, setEditing] = useState<Task | null>(null);
+  const [pickingLoose, setPickingLoose] = useState(false);
   const reloadTimer = useRef<number | undefined>(undefined);
 
   const projectId = board?.projectId ?? null;
@@ -325,6 +327,14 @@ export function BoardsPage() {
         </div>
       </div>
 
+      {board && board.looseTasks.length > 0 && (
+        <p className="notice notice--compact" role="status">
+          Hay {board.looseTasks.length} {board.looseTasks.length === 1 ? 'tarea pendiente' : 'tareas pendientes'} fuera
+          de cualquier Sprint.{' '}
+          <button type="button" className="link-btn" onClick={() => setPickingLoose(true)}>Pasarlas a este Sprint</button>
+        </p>
+      )}
+
       {error && (
         <p className="form__error" role="alert">
           {error}
@@ -486,6 +496,11 @@ export function BoardsPage() {
           onClose={() => setColumnEditing(null)}
           onChanged={() => { setColumnEditing(null); void loadBoard(); }}
           onDeleted={() => { setColumnEditing(null); void loadBoard(); }} />
+      )}
+
+      {pickingLoose && board?.sprint && (
+        <LooseTasksDialog board={board} token={token} onClose={() => setPickingLoose(false)}
+          onAdded={() => { setPickingLoose(false); void loadBoard(); }} />
       )}
 
       {editing && board && (
@@ -845,6 +860,90 @@ function TaskDialog({ task, board, token, onClose, onSaved, onArchived, onMoved,
             </button>
           </footer>
         )}
+      </form>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ tareas sin Sprint
+function LooseTasksDialog({ board, token, onClose, onAdded }: {
+  board: Board;
+  token: string | null;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [selected, setSelected] = useState<string[]>(board.looseTasks.map((t) => t.id));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const columnName = new Map(board.columns.map((c) => [c.id, c.name]));
+  const all = selected.length === board.looseTasks.length;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/sprints/${board.sprint?.id}/tasks`, token, {
+        method: 'POST',
+        body: JSON.stringify({ taskIds: selected }),
+      });
+      onAdded();
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudieron pasar las tareas al Sprint.'));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="dialog card" onSubmit={submit} role="dialog" aria-modal="true" aria-label="Tareas sin Sprint">
+        <header className="card__head">
+          <h2><Icon name="boards" size={20} className="card__icon" /> Tareas sin Sprint</h2>
+          <button type="button" className="icon-btn" aria-label="Cerrar" onClick={onClose}>
+            <Icon name="close" size={18} />
+          </button>
+        </header>
+
+        <div className="form" style={{ marginTop: 0 }}>
+          <p className="muted small" style={{ margin: 0 }}>
+            Tareas pendientes que no pertenecen a ningún Sprint. Las que elijas pasan al Sprint #{board.sprint?.number} y
+            mantienen su columna.
+          </p>
+          <label className="check">
+            <input type="checkbox" checked={all}
+              onChange={() => setSelected(all ? [] : board.looseTasks.map((t) => t.id))} />
+            Seleccionar todas
+          </label>
+          <ul className="pick-list">
+            {board.looseTasks.map((t) => (
+              <li key={t.id}>
+                <label className="check">
+                  <input type="checkbox" checked={selected.includes(t.id)}
+                    onChange={() => setSelected((ids) => (ids.includes(t.id) ? ids.filter((x) => x !== t.id) : [...ids, t.id]))} />
+                  {t.backlogItemCode && <span className="pbi-row__code">{t.backlogItemCode}</span>}
+                  <span className="pick-list__title">{t.title}</span>
+                  <span className="muted small">{columnName.get(t.columnId)}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        {error && <p className="form__error" role="alert">{error}</p>}
+
+        <footer className="dialog__actions">
+          <span style={{ flex: 1 }} />
+          <button type="button" className="btn btn--ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn btn--primary" disabled={busy || selected.length === 0}>
+            {busy ? 'Pasando…' : `Pasar ${selected.length} al Sprint`}
+          </button>
+        </footer>
       </form>
     </div>
   );

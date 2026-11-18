@@ -2252,3 +2252,13 @@ img, svg { max-width: 100%; }
 .sprint-summary { display: grid; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.85rem; }
 .sprint-summary__metrics { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
 .sprint-summary ul { margin: 0.2rem 0 0; padding-left: 1.1rem; }
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
