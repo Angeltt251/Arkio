@@ -50,6 +50,17 @@ class ColumnOut(CamelModel):
     tasks: list[TaskOut]
 
 
+class BoardSprint(CamelModel):
+    """El Sprint al que pertenece el tablero: solo se ven sus tareas."""
+
+    id: UUID
+    number: int
+    goal: str
+    start_date: date
+    end_date: date
+    status: Literal["planned", "active", "closed", "cancelled"]
+
+
 class BoardOut(CamelModel):
     project_id: UUID
     project_name: str
@@ -60,6 +71,7 @@ class BoardOut(CamelModel):
     columns: list[ColumnOut]
     members: list[BoardMember]
     labels: list[LabelOut] = []
+    sprint: BoardSprint | None = None
 
 
 class TaskCreate(CamelModel):
@@ -71,6 +83,7 @@ class TaskCreate(CamelModel):
     assignee_ids: list[UUID] = []
     label_ids: list[UUID] = []
     backlog_item_id: UUID | None = None
+    sprint_id: UUID | None = None  # creada desde el tablero de un Sprint
 
 
 class TaskUpdate(CamelModel):

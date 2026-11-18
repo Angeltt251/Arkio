@@ -85,6 +85,7 @@ export function SprintsPage() {
     useProjectResource<SprintsData>((id) => `/api/projects/${id}/sprints`);
   const [planning, setPlanning] = useState(false);
   const [closing, setClosing] = useState<Sprint | null>(null);
+  const [editingSprint, setEditingSprint] = useState<Sprint | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -175,21 +176,29 @@ export function SprintsPage() {
 
           {open.map((sprint) => (
             <SprintCard key={sprint.id} sprint={sprint}>
-              {data.canManage && (
-                <div className="sprint-box__actions">
-                  {sprint.status === 'planned' && (
-                    <button type="button" className="btn btn--primary btn--sm" disabled={busy === sprint.id || hasActive}
-                      title={hasActive ? 'Cierra el Sprint en curso antes de iniciar otro' : undefined}
-                      onClick={() => void start(sprint)}>
-                      Iniciar Sprint
-                    </button>
-                  )}
-                  <Link to={`/tableros?proyecto=${data.projectId}`} className="btn btn--ghost btn--sm">Ver tablero</Link>
+              <div className="sprint-box__actions">
+                {data.canManage && sprint.status === 'planned' && (
+                  <button type="button" className="btn btn--primary btn--sm" disabled={busy === sprint.id || hasActive}
+                    title={hasActive ? 'Cierra el Sprint en curso antes de iniciar otro' : undefined}
+                    onClick={() => void start(sprint)}>
+                    Iniciar Sprint
+                  </button>
+                )}
+                <Link to={boardLink(sprint, data.projectId)}
+                  className={`btn btn--sm ${sprint.status === 'active' ? 'btn--primary' : 'btn--ghost'}`}>
+                  <Icon name="boards" size={15} /> Ver tablero
+                </Link>
+                {data.canEdit && (
+                  <button type="button" className="btn btn--ghost btn--sm" onClick={() => setEditingSprint(sprint)}>
+                    Editar Sprint
+                  </button>
+                )}
+                {data.canManage && (
                   <button type="button" className="btn btn--ghost btn--sm" onClick={() => setClosing(sprint)}>
                     {sprint.status === 'planned' ? 'Cancelar' : 'Cerrar Sprint'}
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </SprintCard>
           ))}
 
@@ -200,6 +209,9 @@ export function SprintsPage() {
                 <SprintCard key={sprint.id} sprint={sprint} compact>
                   {sprint.summary && <SummaryView summary={sprint.summary} />}
                   <div className="sprint-box__actions">
+                    <Link to={boardLink(sprint, data.projectId)} className="btn btn--ghost btn--sm">
+                      <Icon name="boards" size={15} /> Ver tablero
+                    </Link>
                     <Link to={`/reportes?proyecto=${data.projectId}`} className="btn btn--ghost btn--sm">
                       <Icon name="reports" size={15} /> Informe
                     </Link>
@@ -216,6 +228,10 @@ export function SprintsPage() {
           onClose={() => setPlanning(false)}
           onCreated={() => { setPlanning(false); void reload(); }} />
       )}
+      {editingSprint && data && (
+        <EditSprintDialog sprint={editingSprint} data={data} token={token} onClose={() => setEditingSprint(null)}
+          onSaved={() => { setEditingSprint(null); void reload(); }} />
+      )}
       {closing && data && (
         <CloseDialog sprint={closing} projectId={data.projectId} token={token} onClose={() => setClosing(null)}
           onClosed={() => { setClosing(null); void reload(); }} />
@@ -223,6 +239,8 @@ export function SprintsPage() {
     </div>
   );
 }
+
+const boardLink = (sprint: Sprint, projectId: string) => `/sprints/${sprint.id}/tablero?proyecto=${projectId}`;
 
 function SprintCard({ sprint, compact = false, children }: { sprint: Sprint; compact?: boolean; children?: React.ReactNode }) {
   const percent = sprint.taskCount ? Math.round((sprint.tasksDone * 100) / sprint.taskCount) : 0;
@@ -515,6 +533,176 @@ function PlanningDialog({ data, projectId, token, hasActive, onClose, onCreated 
           <button type="button" className="btn btn--ghost" onClick={onClose}>Cancelar</button>
           <button className="btn btn--primary" disabled={busy || !datesValid || selected.length === 0 || goal.trim().length < 5 || sameAsProductGoal}>
             {busy ? 'Creando…' : 'Confirmar Sprint'}
+          </button>
+        </footer>
+      </form>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------ editar Sprint
+function EditSprintDialog({ sprint, data, token, onClose, onSaved }: {
+  sprint: Sprint;
+  data: SprintsData;
+  token: string | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [goal, setGoal] = useState(sprint.goal);
+  const [startDate, setStartDate] = useState(sprint.startDate);
+  const [endDate, setEndDate] = useState(sprint.endDate);
+  const [removed, setRemoved] = useState<string[]>([]);
+  const [added, setAdded] = useState<string[]>([]);
+  const [tasks, setTasks] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEscape(onClose);
+
+  const planned = sprint.status === 'planned';
+  const length = daysBetween(startDate, endDate) + 1;
+  const datesValid = !!startDate && !!endDate && length >= 1 && length <= 32;
+  const kept = sprint.items.filter((i) => !removed.includes(i.id));
+  const chosen = data.candidates.filter((c) => added.includes(c.id));
+  const points = [...kept, ...chosen].reduce((sum, i) => sum + (i.estimate ?? 0), 0);
+  const sameAsProductGoal = !!data.productGoal &&
+    goal.trim().toLowerCase().replace(/\.$/, '') === data.productGoal.trim().toLowerCase().replace(/\.$/, '');
+  const taskLines = (id: string) => (tasks[id] ?? '').split('\n').map((t) => t.trim()).filter((t) => t.length >= 2);
+  const empty = kept.length + chosen.length === 0;
+
+  const toggle = (list: string[], set: (ids: string[]) => void, id: string) =>
+    set(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/sprints/${sprint.id}`, token, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          goal: goal.trim(), endDate, ...(planned ? { startDate } : {}),
+          addItemIds: added, removeItemIds: removed,
+          tasks: Object.fromEntries(added.map((id) => [id, taskLines(id)])),
+        }),
+      });
+      onSaved();
+    } catch (err) {
+      setError(errorMessage(err, 'No se pudo guardar el Sprint.'));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <form className="dialog dialog--wide card" onSubmit={submit} role="dialog" aria-modal="true"
+        aria-label={`Editar Sprint #${sprint.number}`}>
+        <header className="card__head">
+          <h2><Icon name="rocket" size={20} className="card__icon" /> Editar Sprint #{sprint.number}</h2>
+          <button type="button" className="icon-btn" aria-label="Cerrar" onClick={onClose}>
+            <Icon name="close" size={18} />
+          </button>
+        </header>
+
+        <div className="form" style={{ marginTop: 0 }}>
+          <label className="field">
+            <span>Sprint Goal</span>
+            <textarea className="textarea" rows={2} required minLength={5} maxLength={500} value={goal}
+              onChange={(e) => setGoal(e.target.value)} />
+            {sameAsProductGoal && (
+              <span className="form__error">Es igual al Product Goal: describe solo lo que se logrará en este Sprint.</span>
+            )}
+          </label>
+
+          <div className="dialog__row">
+            <label className="field">
+              <span className="small">Inicio</span>
+              <input className="select" type="date" required value={startDate} disabled={!planned}
+                title={planned ? undefined : 'El Sprint ya comenzó'} onChange={(e) => setStartDate(e.target.value)} />
+            </label>
+            <label className="field">
+              <span className="small">Término</span>
+              <input className="select" type="date" required min={startDate} value={endDate}
+                onChange={(e) => setEndDate(e.target.value)} />
+            </label>
+          </div>
+          {!datesValid && <p className="form__error">El Sprint debe durar entre 1 día y un mes.</p>}
+
+          <div className="field">
+            <span className="field__row">
+              PBIs del Sprint
+              <span className="muted small">{kept.length + chosen.length} · {points} pts</span>
+            </span>
+            <ul className="pick-list">
+              {sprint.items.map((i) => {
+                const out = removed.includes(i.id);
+                return (
+                  <li key={i.id} className={out ? 'sprint-edit__removed' : undefined}>
+                    <label className="check">
+                      <input type="checkbox" checked={!out} onChange={() => toggle(removed, setRemoved, i.id)} />
+                      <span className="pbi-row__code">{i.code}</span>
+                      <span className="pick-list__title">{i.title}</span>
+                      <span className="muted small">{i.tasksDone}/{i.taskCount} tareas</span>
+                      <span className="pbi-row__estimate">{i.estimate ?? '—'}</span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+            {removed.length > 0 && (
+              <p className="notice notice--compact" style={{ margin: 0 }}>
+                {removed.length === 1 ? 'El PBI quitado vuelve' : 'Los PBIs quitados vuelven'} al Product Backlog como
+                «Refinado» y sus tareas salen del tablero de este Sprint.
+              </p>
+            )}
+          </div>
+
+          <div className="field">
+            <span className="field__row">
+              Agregar PBIs del Product Backlog
+              <span className="muted small">{chosen.length} seleccionados</span>
+            </span>
+            {data.candidates.length === 0 ? (
+              <p className="muted small" style={{ margin: 0 }}>No hay PBIs disponibles en el Product Backlog.</p>
+            ) : (
+              <ul className="pick-list sprint-edit__pbis">
+                {data.candidates.map((c) => {
+                  const on = added.includes(c.id);
+                  return (
+                    <li key={c.id}>
+                      <label className="check">
+                        <input type="checkbox" checked={on} onChange={() => toggle(added, setAdded, c.id)} />
+                        <span className="pbi-row__code">{c.code}</span>
+                        <span className="pick-list__title">{c.title}</span>
+                        <span className={`pill pbi-status pbi-status--${c.status}`}>{PBI_STATUS_LABEL[c.status]}</span>
+                        <span className="pbi-row__estimate">{c.estimate ?? '—'}</span>
+                      </label>
+                      {on && (c.taskCount > c.tasksDone ? (
+                        <span className="muted small">
+                          Tiene {c.taskCount - c.tasksDone} tareas pendientes de un Sprint anterior: pasan a este Sprint.
+                        </span>
+                      ) : (
+                        <textarea className="textarea" rows={2} maxLength={4000} value={tasks[c.id] ?? ''}
+                          aria-label={`Tareas de ${c.code}`}
+                          placeholder={`Una tarea por línea · sin tareas: se crea una tarjeta «${c.title}»`}
+                          onChange={(e) => setTasks((t) => ({ ...t, [c.id]: e.target.value }))} />
+                      ))}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+          {empty && <p className="form__error">El Sprint debe tener al menos un PBI.</p>}
+        </div>
+
+        {error && <p className="form__error" role="alert">{error}</p>}
+
+        <footer className="dialog__actions">
+          <span style={{ flex: 1 }} />
+          <button type="button" className="btn btn--ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn btn--primary"
+            disabled={busy || !datesValid || empty || goal.trim().length < 5 || sameAsProductGoal}>
+            {busy ? 'Guardando…' : 'Guardar cambios'}
           </button>
         </footer>
       </form>

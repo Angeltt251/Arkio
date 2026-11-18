@@ -59,7 +59,7 @@ export function CurrentSprintCard({ sprint }: { sprint: CurrentSprint | null }) 
           </h4>
           <div className="sprint-card__footer">
             <p className="sprint-card__goal">{sprint.goal}</p>
-            <Link to={`/tableros?proyecto=${sprint.projectId}`} className="btn btn--primary btn--sm">
+            <Link to={`/sprints/${sprint.id}/tablero?proyecto=${sprint.projectId}`} className="btn btn--primary btn--sm">
               Ver detalles <Icon name="arrowRight" size={15} />
             </Link>
           </div>

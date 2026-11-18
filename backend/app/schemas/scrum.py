@@ -160,7 +160,12 @@ class SprintCreate(CamelModel):
 
 class SprintUpdate(CamelModel):
     goal: str | None = Field(default=None, min_length=5, max_length=500)
+    start_date: date | None = None  # solo mientras está planificado
     end_date: date | None = None
+    # Ajuste del alcance del Sprint Backlog
+    add_item_ids: list[UUID] = []
+    remove_item_ids: list[UUID] = []
+    tasks: dict[UUID, list[Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]]] = {}
 
 
 class SprintClose(CamelModel):

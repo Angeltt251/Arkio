@@ -100,9 +100,75 @@ def _managed_sprint(db: Session, sprint_id: UUID, user_id: UUID) -> Sprint:
     return sprint
 
 
+def _sprint_link(sprint: Sprint) -> str:
+    return f"/sprints/{sprint.id}/tablero?proyecto={sprint.project_id}"
+
+
+def _available_items(db: Session, project_id: UUID, ids: list[UUID]) -> list[BacklogItem]:
+    """PBIs del proyecto que se pueden llevar a un Sprint (en el orden del backlog)."""
+    wanted = list(dict.fromkeys(ids))
+    items = list(db.scalars(select(BacklogItem).where(BacklogItem.id.in_(wanted)).order_by(BacklogItem.rank)))
+    if len(items) != len(wanted) or any(i.project_id != project_id or i.archived_at for i in items):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Algún PBI no pertenece a este proyecto")
+    if busy := [i.code for i in items if i.status not in ("new", "refined", "ready")]:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Estos PBIs no están disponibles para un Sprint: {', '.join(busy)}")
+    return items
+
+
+def _add_items(db: Session, sprint: Sprint, items: list[BacklogItem], tasks: dict[UUID, list[str]] | None,
+               user_id: UUID) -> None:
+    """Suma PBIs al Sprint Backlog y deja sus tareas en el tablero del Sprint.
+
+    `tasks` son los títulos de la descomposición de cada PBI; `None` no crea tarjetas nuevas.
+    """
+    first_column = db.scalar(
+        select(BoardColumn).where(BoardColumn.project_id == sprint.project_id, BoardColumn.is_done.is_(False))
+        .order_by(BoardColumn.position).limit(1)
+    )
+    position = 0.0
+    if first_column:
+        position = db.scalar(select(func.max(Task.position)).where(Task.column_id == first_column.id)) or 0.0
+    for item in items:
+        db.add(SprintItem(sprint_id=sprint.id, backlog_item_id=item.id))
+        item.status = "in_sprint"
+        # Las tareas pendientes de un Sprint anterior pasan a este; si no tiene, se crea una tarjeta
+        pending = list(db.scalars(select(Task).where(
+            Task.backlog_item_id == item.id, Task.archived_at.is_(None), Task.completed_at.is_(None)
+        )))
+        for task in pending:
+            task.sprint_id = sprint.id
+        if not pending and tasks is not None and first_column:
+            # Descomposición del PBI en tareas; sin tareas indicadas, una tarjeta con el título del PBI
+            titles = [t for t in tasks.get(item.id, []) if len(t) >= 2] or [item.title]
+            for title in titles:
+                position += 1
+                db.add(Task(
+                    project_id=sprint.project_id, column_id=first_column.id, sprint_id=sprint.id,
+                    backlog_item_id=item.id, title=title, priority=item.priority, position=position,
+                    created_by=user_id,
+                ))
+
+
+def _remove_items(db: Session, sprint: Sprint, item_ids: list[UUID]) -> None:
+    """Saca PBIs del Sprint Backlog: vuelven al Product Backlog y sus tareas salen del tablero del Sprint."""
+    links = list(db.scalars(select(SprintItem).where(
+        SprintItem.sprint_id == sprint.id, SprintItem.backlog_item_id.in_(item_ids)
+    )))
+    if len(links) != len(set(item_ids)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Algún PBI no está en este Sprint")
+    for link in links:
+        item = db.get(BacklogItem, link.backlog_item_id)
+        if item.status == "in_sprint":
+            item.status = "refined"
+        # Las tareas quedan ligadas al PBI: si vuelve a planificarse, las pendientes lo acompañan
+        for task in db.scalars(select(Task).where(Task.backlog_item_id == item.id, Task.sprint_id == sprint.id)):
+            task.sprint_id = None
+        db.delete(link)
+
+
 def _notify_started(db: Session, project: Project, sprint: Sprint, actor_id: UUID) -> None:
     notify(db, project_member_ids(db, project.id), actor_id=actor_id, kind="sprint", project_id=project.id,
-           link=f"/tableros?proyecto={project.id}",
+           link=_sprint_link(sprint),
            title=f"Comenzó el Sprint {sprint.number} de {project.name}", body=f"Sprint Goal: {sprint.goal}")
 
 
@@ -143,12 +209,7 @@ def plan_sprint(project_id: UUID, payload: SprintCreate, user: CurrentUser, db: 
         raise HTTPException(status.HTTP_409_CONFLICT,
                             f"El Sprint #{active.number} sigue en curso: ciérralo antes de iniciar otro")
 
-    wanted = list(dict.fromkeys(payload.item_ids))
-    items = list(db.scalars(select(BacklogItem).where(BacklogItem.id.in_(wanted)).order_by(BacklogItem.rank)))
-    if len(items) != len(wanted) or any(i.project_id != project_id or i.archived_at for i in items):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Algún PBI no pertenece a este proyecto")
-    if busy := [i.code for i in items if i.status not in ("new", "refined", "ready")]:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Estos PBIs no están disponibles para un Sprint: {', '.join(busy)}")
+    items = _available_items(db, project_id, payload.item_ids)
 
     members = set(db.scalars(select(ProjectMember.user_id).where(ProjectMember.project_id == project_id)))
     if not set(payload.attendee_ids) <= members:
@@ -165,31 +226,7 @@ def plan_sprint(project_id: UUID, payload: SprintCreate, user: CurrentUser, db: 
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Ya hay un Sprint en curso en este proyecto") from exc
 
-    first_column = db.scalar(
-        select(BoardColumn).where(BoardColumn.project_id == project_id, BoardColumn.is_done.is_(False))
-        .order_by(BoardColumn.position).limit(1)
-    )
-    position = 0.0
-    if first_column:
-        position = db.scalar(select(func.max(Task.position)).where(Task.column_id == first_column.id)) or 0.0
-    for item in items:
-        db.add(SprintItem(sprint_id=sprint.id, backlog_item_id=item.id))
-        item.status = "in_sprint"
-        # Las tareas pendientes de un Sprint anterior pasan a este; si no tiene, se crea una tarjeta
-        pending = list(db.scalars(select(Task).where(
-            Task.backlog_item_id == item.id, Task.archived_at.is_(None), Task.completed_at.is_(None)
-        )))
-        for task in pending:
-            task.sprint_id = sprint.id
-        if not pending and payload.create_tasks and first_column:
-            # Descomposición del PBI en tareas; sin tareas indicadas, una tarjeta con el título del PBI
-            titles = [t for t in payload.tasks.get(item.id, []) if len(t) >= 2] or [item.title]
-            for title in titles:
-                position += 1
-                db.add(Task(
-                    project_id=project_id, column_id=first_column.id, sprint_id=sprint.id, backlog_item_id=item.id,
-                    title=title, priority=item.priority, position=position, created_by=user.id,
-                ))
+    _add_items(db, sprint, items, payload.tasks if payload.create_tasks else None, user.id)
 
     codes = ", ".join(i.code for i in items)
     planning = ScrumEvent(
@@ -219,11 +256,28 @@ def update_sprint(sprint_id: UUID, payload: SprintUpdate, user: CurrentUser, db:
     project_access(db, sprint.project_id, user.id, write=True)
     if sprint.status not in OPEN:
         raise HTTPException(status.HTTP_409_CONFLICT, "El Sprint ya terminó: su historia no se modifica")
+    project = db.get(Project, sprint.project_id)
     if payload.goal is not None:
+        if _same_text(payload.goal, project.product_goal):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "El Sprint Goal no es el Product Goal: describe el resultado concreto de este Sprint")
         sprint.goal = payload.goal.strip()
+    if payload.start_date is not None and payload.start_date != sprint.start_date:
+        if sprint.status != "planned":
+            raise HTTPException(status.HTTP_409_CONFLICT, "El Sprint ya comenzó: su fecha de inicio no cambia")
+        sprint.start_date = payload.start_date
     if payload.end_date is not None:
-        _check_dates(sprint.start_date, payload.end_date)
         sprint.end_date = payload.end_date
+    _check_dates(sprint.start_date, sprint.end_date)
+
+    added = [i for i in payload.add_item_ids if i not in payload.remove_item_ids]
+    if payload.remove_item_ids:
+        _remove_items(db, sprint, list(dict.fromkeys(payload.remove_item_ids)))
+    if added:
+        _add_items(db, sprint, _available_items(db, sprint.project_id, added), payload.tasks, user.id)
+    db.flush()
+    if not db.scalar(select(func.count()).select_from(SprintItem).where(SprintItem.sprint_id == sprint.id)):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El Sprint debe tener al menos un PBI")
     db.commit()
     db.refresh(sprint)
     return _sprint_out(db, sprint)

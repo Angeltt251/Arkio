@@ -10,7 +10,7 @@ import { ForgotPasswordPage } from '@/pages/auth/ForgotPasswordPage';
 import { LoginPage } from '@/pages/auth/LoginPage';
 import { RegisterPage } from '@/pages/auth/RegisterPage';
 import { BacklogPage } from '@/pages/BacklogPage';
-import { BoardsPage } from '@/pages/BoardsPage';
+import { BoardRedirect, BoardsPage } from '@/pages/BoardsPage';
 import { EventsPage } from '@/pages/EventsPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
@@ -39,11 +39,12 @@ export default function App() {
                 <Route index element={<DashboardPage />} />
                 <Route path="/espacios" element={<WorkspacesPage />} />
                 <Route path="/ciclo" element={<LifecyclePage />} />
-                <Route path="/tableros" element={<BoardsPage />} />
+                <Route path="/tableros" element={<BoardRedirect />} />
                 <Route path="/miembros" element={<MembersPage />} />
                 <Route path="/bitacora" element={<LogbookPage />} />
                 <Route path="/backlog" element={<BacklogPage />} />
                 <Route path="/sprints" element={<SprintsPage />} />
+                <Route path="/sprints/:sprintId/tablero" element={<BoardsPage />} />
                 <Route path="/eventos" element={<EventsPage />} />
                 <Route path="/reportes" element={<ReportsPage />} />
                 <Route path="/configuracion" element={<SettingsPage />} />

@@ -21,7 +21,6 @@ export const PROJECT_ITEMS: NavItem[] = [
   { to: '/ciclo', label: 'Ciclo del proyecto', icon: 'target' },
   { to: '/backlog', label: 'Product Backlog', icon: 'list' },
   { to: '/sprints', label: 'Sprints', icon: 'rocket' },
-  { to: '/tableros', label: 'Tablero', icon: 'boards' },
   { to: '/eventos', label: 'Eventos Scrum', icon: 'calendar' },
   { to: '/bitacora', label: 'Bitácora', icon: 'logbook' },
   { to: '/reportes', label: 'Reportes', icon: 'reports' },

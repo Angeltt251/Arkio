@@ -67,7 +67,7 @@ const LABEL_COLORS = ['#64748B', '#447794', '#27AE60', '#F2994A', '#EB5757', '#9
 const START_PAGES = [
   { value: '/', label: 'Inicio (dashboard)' },
   { value: '/espacios', label: 'Espacios de trabajo' },
-  { value: '/tableros', label: 'Tablero' },
+  { value: '/tableros', label: 'Tablero del Sprint en curso' },
   { value: '/backlog', label: 'Product Backlog' },
   { value: '/sprints', label: 'Sprints' },
   { value: '/reportes', label: 'Reportes' },

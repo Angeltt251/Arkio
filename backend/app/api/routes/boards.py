@@ -1,4 +1,4 @@
-"""Tablero Kanban del proyecto: columnas, tareas y movimientos.
+"""Tablero Kanban: columnas del proyecto y tareas de cada Sprint, con sus movimientos.
 
 Las tareas no se borran: se archivan, para que la bitácora conserve la trazabilidad.
 """
@@ -17,6 +17,7 @@ from app.db.models import (
     ChecklistItem,
     Label,
     Profile,
+    Project,
     ProjectMember,
     Sprint,
     SprintItem,
@@ -27,6 +28,7 @@ from app.db.models import (
 from app.schemas.board import (
     BoardMember,
     BoardOut,
+    BoardSprint,
     ChecklistItemCreate,
     ChecklistItemOut,
     ChecklistItemUpdate,
@@ -121,6 +123,8 @@ def _project_member_ids(db: Session, project_id: UUID) -> set[UUID]:
 
 
 def _task_link(task: Task) -> str:
+    if task.sprint_id:
+        return f"/sprints/{task.sprint_id}/tablero?proyecto={task.project_id}&tarea={task.id}"
     return f"/tableros?proyecto={task.project_id}&tarea={task.id}"
 
 
@@ -158,10 +162,13 @@ def _editable_task(db: Session, task_id: UUID, user_id: UUID) -> Task:
     return task
 
 
-def _check_wip(db: Session, column: BoardColumn, exclude_task: UUID | None = None) -> None:
+def _check_wip(db: Session, column: BoardColumn, sprint_id: UUID | None, exclude_task: UUID | None = None) -> None:
+    """El límite cuenta las tareas de la columna en el tablero del Sprint (las que el equipo ve)."""
     if column.wip_limit is None:
         return
     query = select(func.count()).select_from(Task).where(Task.column_id == column.id, Task.archived_at.is_(None))
+    if sprint_id:
+        query = query.where(Task.sprint_id == sprint_id)
     if exclude_task:
         query = query.where(Task.id != exclude_task)
     if db.scalar(query) >= column.wip_limit:
@@ -170,33 +177,50 @@ def _check_wip(db: Session, column: BoardColumn, exclude_task: UUID | None = Non
         )
 
 
-@router.get("/projects/{project_id}/board", response_model=BoardOut)
-def get_board(project_id: UUID, user: CurrentUser, db: UserDB) -> BoardOut:
-    project = project_access(db, project_id, user.id)
-    columns = _columns(db, project_id)
-    tasks = list(db.scalars(
-        select(Task).where(Task.project_id == project_id, Task.archived_at.is_(None)).order_by(Task.position, Task.created_at)
-    ))
+def _board(db: Session, project: Project, user_id: UUID, sprint: Sprint | None = None) -> BoardOut:
+    columns = _columns(db, project.id)
+    query = select(Task).where(Task.project_id == project.id, Task.archived_at.is_(None))
+    if sprint:
+        query = query.where(Task.sprint_id == sprint.id)
+    tasks = list(db.scalars(query.order_by(Task.position, Task.created_at)))
     by_column: dict[UUID, list[TaskOut]] = {c.id: [] for c in columns}
     for out in _task_outs(db, tasks):
         by_column.setdefault(out.column_id, []).append(out)
 
     members = db.execute(
         select(Profile).join(ProjectMember, ProjectMember.user_id == Profile.id)
-        .where(ProjectMember.project_id == project_id).order_by(Profile.full_name)
+        .where(ProjectMember.project_id == project.id).order_by(Profile.full_name)
     ).scalars()
+    # Un Sprint cerrado o cancelado es historia: su tablero queda de solo lectura
+    open_sprint = sprint is None or sprint.status in ("planned", "active")
     return BoardOut(
         project_id=project.id, project_name=project.name, project_key=project.key, project_color=project.color,
-        can_edit=can_edit(db, project, user.id),
-        can_manage_columns=can_manage(db, project, user.id),
+        can_edit=open_sprint and can_edit(db, project, user_id),
+        can_manage_columns=open_sprint and can_manage(db, project, user_id),
         columns=[
             ColumnOut(id=c.id, name=c.name, position=c.position, wip_limit=c.wip_limit, is_done=c.is_done,
                       tasks=by_column[c.id])
             for c in columns
         ],
         members=[BoardMember(id=m.id, name=m.full_name or m.email, avatar_url=m.avatar_url) for m in members],
-        labels=[LabelOut(id=lb.id, name=lb.name, color=lb.color) for lb in _labels(db, project_id)],
+        labels=[LabelOut(id=lb.id, name=lb.name, color=lb.color) for lb in _labels(db, project.id)],
+        sprint=BoardSprint(id=sprint.id, number=sprint.number, goal=sprint.goal, start_date=sprint.start_date,
+                           end_date=sprint.end_date, status=sprint.status) if sprint else None,
     )
+
+
+@router.get("/projects/{project_id}/board", response_model=BoardOut)
+def get_board(project_id: UUID, user: CurrentUser, db: UserDB) -> BoardOut:
+    return _board(db, project_access(db, project_id, user.id), user.id)
+
+
+@router.get("/sprints/{sprint_id}/board", response_model=BoardOut)
+def get_sprint_board(sprint_id: UUID, user: CurrentUser, db: UserDB) -> BoardOut:
+    """El tablero del Sprint: las columnas del proyecto con solo las tareas de ese Sprint."""
+    sprint = db.get(Sprint, sprint_id)
+    if sprint is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Sprint no encontrado")
+    return _board(db, project_access(db, sprint.project_id, user.id), user.id, sprint)
 
 
 @router.post("/projects/{project_id}/tasks", response_model=TaskOut, status_code=status.HTTP_201_CREATED)
@@ -208,7 +232,6 @@ def create_task(project_id: UUID, payload: TaskCreate, user: CurrentUser, db: Us
     column = next((c for c in columns if c.id == payload.column_id), None) if payload.column_id else columns[0]
     if column is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "La columna no pertenece a este proyecto")
-    _check_wip(db, column)
     _check_pbi(db, project_id, payload.backlog_item_id)
 
     last = db.scalar(select(func.max(Task.position)).where(Task.column_id == column.id, Task.archived_at.is_(None)))
@@ -217,12 +240,21 @@ def create_task(project_id: UUID, payload: TaskCreate, user: CurrentUser, db: Us
         priority=payload.priority, due_date=payload.due_date, position=(last or 0) + 1, created_by=user.id,
         backlog_item_id=payload.backlog_item_id,
     )
-    if payload.backlog_item_id:
+    if payload.sprint_id:
+        # Creada desde el tablero de un Sprint: nace en ese Sprint
+        sprint = db.get(Sprint, payload.sprint_id)
+        if sprint is None or sprint.project_id != project_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "El Sprint no pertenece a este proyecto")
+        if sprint.status not in ("planned", "active"):
+            raise HTTPException(status.HTTP_409_CONFLICT, "El Sprint ya terminó: no se le agregan tareas")
+        task.sprint_id = sprint.id
+    elif payload.backlog_item_id:
         # La tarea nace dentro del Sprint donde está su PBI (si hay uno abierto)
         task.sprint_id = db.scalar(
             select(Sprint.id).join(SprintItem, SprintItem.sprint_id == Sprint.id)
             .where(SprintItem.backlog_item_id == payload.backlog_item_id, Sprint.status.in_(("planned", "active")))
         )
+    _check_wip(db, column, task.sprint_id)
     db.add(task)
     db.flush()
     _notify_assigned(db, task, _set_assignees(db, task, payload.assignee_ids), user.id)
@@ -264,7 +296,7 @@ def move_task(task_id: UUID, payload: TaskMove, user: CurrentUser, db: UserDB) -
     if column is None or column.project_id != task.project_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "La columna no pertenece a este proyecto")
     if column.id != task.column_id:
-        _check_wip(db, column, exclude_task=task.id)
+        _check_wip(db, column, task.sprint_id, exclude_task=task.id)
 
     siblings = list(db.scalars(
         select(Task.position).where(Task.column_id == column.id, Task.archived_at.is_(None), Task.id != task.id)

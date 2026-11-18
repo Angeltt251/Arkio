@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Avatar } from '@/components/ui/Avatar';
 import { Icon } from '@/components/ui/Icon';
 import { useAuth } from '@/context/AuthContext';
+import { useProjectResource } from '@/hooks/useProjectResource';
 import { apiFetch } from '@/lib/api';
+import { sprintRange } from '@/lib/format';
 import { connectRealtime } from '@/lib/realtime';
+import { SPRINT_STATUS_LABEL, type SprintStatus } from '@/lib/scrum';
 
 type Priority = 'low' | 'medium' | 'high' | 'critical';
 
@@ -56,6 +59,15 @@ interface Member {
   avatarUrl: string | null;
 }
 
+interface BoardSprint {
+  id: string;
+  number: number;
+  goal: string;
+  startDate: string;
+  endDate: string;
+  status: SprintStatus;
+}
+
 interface Board {
   projectId: string;
   projectName: string;
@@ -66,12 +78,7 @@ interface Board {
   columns: Column[];
   members: Member[];
   labels: Label[];
-}
-
-interface ProjectOption {
-  id: string;
-  name: string;
-  color: string;
+  sprint: BoardSprint | null;
 }
 
 const LABEL_COLORS = ['#447794', '#22A06B', '#F08A24', '#E5487D', '#2F80ED', '#8B5CF6', '#64748B'];
@@ -97,10 +104,34 @@ function moveLocally(columns: Column[], taskId: string, columnId: string, index:
   });
 }
 
+/** `/tableros?proyecto=`: el tablero vive dentro del Sprint, así que abre el del Sprint en curso. */
+export function BoardRedirect() {
+  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const { projects, projectId, data, error } =
+    useProjectResource<{ sprints: { id: string; status: SprintStatus }[] }>((id) => `/api/projects/${id}/sprints`);
+
+  useEffect(() => {
+    if (projects && projects.length === 0) navigate('/espacios', { replace: true });
+    if (!data || !projectId) return;
+    const sprint = data.sprints.find((s) => s.status === 'active') ?? data.sprints.find((s) => s.status === 'planned');
+    const task = params.get('tarea');
+    navigate(
+      sprint
+        ? `/sprints/${sprint.id}/tablero?proyecto=${projectId}${task ? `&tarea=${task}` : ''}`
+        : `/sprints?proyecto=${projectId}`,
+      { replace: true },
+    );
+  }, [projects, projectId, data, params, navigate]);
+
+  return error ? <p className="form__error" role="alert">{error}</p> : null;
+}
+
+/** Tablero de un Sprint: las columnas del proyecto con solo las tareas de ese Sprint. */
 export function BoardsPage() {
   const { token } = useAuth();
+  const { sprintId } = useParams();
   const [params, setParams] = useSearchParams();
-  const [projects, setProjects] = useState<ProjectOption[] | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -115,29 +146,34 @@ export function BoardsPage() {
   const [editing, setEditing] = useState<Task | null>(null);
   const reloadTimer = useRef<number | undefined>(undefined);
 
-  const projectId = params.get('proyecto') ?? projects?.[0]?.id ?? null;
-
-  useEffect(() => {
-    if (!token) return;
-    apiFetch<ProjectOption[]>('/api/projects', token)
-      .then(setProjects)
-      .catch((err) => setError(errorMessage(err, 'No se pudieron cargar los proyectos.')));
-  }, [token]);
+  const projectId = board?.projectId ?? null;
+  const sprint = board?.sprint ?? null;
 
   const loadBoard = useCallback(async () => {
-    if (!token || !projectId) return;
+    if (!token || !sprintId) return;
     try {
-      setBoard(await apiFetch<Board>(`/api/projects/${projectId}/board`, token));
+      setBoard(await apiFetch<Board>(`/api/sprints/${sprintId}/board`, token));
       setError(null);
     } catch (err) {
       setError(errorMessage(err, 'No se pudo cargar el tablero.'));
     }
-  }, [token, projectId]);
+  }, [token, sprintId]);
 
   useEffect(() => {
     setBoard(null);
     void loadBoard();
   }, [loadBoard]);
+
+  // El menú lateral reconoce el proyecto por `?proyecto=`
+  const urlProject = params.get('proyecto');
+  useEffect(() => {
+    if (!projectId || urlProject === projectId) return;
+    setParams((p) => {
+      const next = new URLSearchParams(p);
+      next.set('proyecto', projectId);
+      return next;
+    }, { replace: true });
+  }, [projectId, urlProject, setParams]);
 
   // Tiempo real: si otro integrante cambia algo en este proyecto, recargar
   useEffect(() => {
@@ -216,7 +252,9 @@ export function BoardsPage() {
     try {
       const task = await apiFetch<Task>(`/api/projects/${projectId}/tasks`, token, {
         method: 'POST',
-        body: JSON.stringify({ title, columnId, description: newDescription.trim() || null, priority: newPriority }),
+        body: JSON.stringify({
+          title, columnId, description: newDescription.trim() || null, priority: newPriority, sprintId: sprint?.id ?? null,
+        }),
       });
       setBoard((b) =>
         b ? { ...b, columns: b.columns.map((c) => (c.id === columnId ? { ...c, tasks: [...c.tasks, task] } : c)) } : b,
@@ -257,44 +295,34 @@ export function BoardsPage() {
     setBoard((b) => (b ? { ...b, columns: b.columns.map((c) => ({ ...c, tasks: c.tasks.filter((t) => t.id !== taskId) })) } : b));
 
   // ------------------------------------------------------------ render
-  if (projects && projects.length === 0) {
-    return (
-      <div className="dashboard">
-        <div className="page-head">
-          <div>
-            <h1>Tableros</h1>
-            <p className="muted">Organiza el trabajo del equipo en columnas.</p>
-          </div>
-        </div>
-        <div className="empty">
-          <p>Aún no tienes proyectos.</p>
-          <Link to="/espacios" className="btn btn--primary btn--sm" style={{ justifySelf: 'center' }}>
-            <Icon name="plus" size={16} /> Crear un proyecto
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="dashboard board-page">
       <div className="page-head">
         <div>
-          <h1>{board ? board.projectName : 'Tableros'}</h1>
-          <p className="muted">
+          <Link to={`/sprints${projectId ? `?proyecto=${projectId}` : ''}`} className="back-link muted small">
+            <Icon name="arrowRight" size={14} className="back-link__icon" /> Sprints
+          </Link>
+          <h1>
+            {sprint ? `Tablero del Sprint #${sprint.number}` : 'Tablero del Sprint'}
+            {sprint && (
+              <span className={`pill pill--${sprint.status === 'active' ? 'active' : sprint.status === 'planned' ? 'sprint-planned' : 'closed'}`}>
+                <span className="dot" /> {SPRINT_STATUS_LABEL[sprint.status]}
+              </span>
+            )}
+          </h1>
+          {sprint && (
+            <p className="muted">
+              <strong>Sprint Goal:</strong> {sprint.goal} · {sprintRange(sprint.startDate, sprint.endDate)}
+            </p>
+          )}
+          <p className="muted small">
             {board?.canEdit === false
-              ? 'Solo lectura: tu rol de observador no permite editar.'
+              ? sprint && !['planned', 'active'].includes(sprint.status)
+                ? 'Sprint terminado: el tablero queda como registro de solo lectura.'
+                : 'Solo lectura: tu rol de observador no permite editar.'
               : 'Arrastra las tarjetas entre columnas para actualizar su estado.'}
           </p>
         </div>
-        {projects && projects.length > 1 && (
-          <select className="select" aria-label="Proyecto" value={projectId ?? ''}
-            onChange={(e) => setParams({ proyecto: e.target.value })}>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        )}
       </div>
 
       {error && (
@@ -456,7 +484,7 @@ export function BoardsPage() {
       {columnEditing && board && (
         <ColumnDialog column={columnEditing} board={board} token={token}
           onClose={() => setColumnEditing(null)}
-          onChanged={(columns) => { setBoard((b) => (b ? { ...b, columns } : b)); setColumnEditing(null); }}
+          onChanged={() => { setColumnEditing(null); void loadBoard(); }}
           onDeleted={() => { setColumnEditing(null); void loadBoard(); }} />
       )}
 

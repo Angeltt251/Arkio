@@ -1803,6 +1803,16 @@ img, svg { max-width: 100%; }
 .sprint-box__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sprint-box__actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
 
+.sprint-edit__pbis li { display: grid; gap: 0.35rem; }
+.sprint-edit__removed .pick-list__title { text-decoration: line-through; opacity: 0.6; }
+
+/* Tablero dentro del Sprint */
+.back-link { display: inline-flex; align-items: center; gap: 0.3rem; margin-bottom: 0.35rem; text-decoration: none; }
+.back-link:hover { color: var(--text); }
+.back-link__icon { transform: rotate(180deg); }
+.board-page .page-head h1 { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.board-page .page-head p { margin: 0.15rem 0 0; }
+
 .pick-list {
   list-style: none;
   margin: 0;
